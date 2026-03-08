@@ -22,6 +22,9 @@ import {
   ThreadRuntimeModeSetPayload,
   ThreadRevertedPayload,
   ThreadSessionSetPayload,
+  ThreadTokenUsageUpdatedPayload,
+  ThreadTurnEnqueuedPayload,
+  ThreadTurnQueueItemRemovedPayload,
   ThreadTurnDiffCompletedPayload,
 } from "./Schemas.ts";
 
@@ -258,10 +261,12 @@ export function projectEvent(
             branch: payload.branch,
             worktreePath: payload.worktreePath,
             latestTurn: null,
+            tokenUsage: null,
             createdAt: payload.createdAt,
             updatedAt: payload.updatedAt,
             deletedAt: null,
             messages: [],
+            queuedTurns: [],
             activities: [],
             checkpoints: [],
             session: null,
@@ -395,6 +400,76 @@ export function projectEvent(
           }),
         };
       });
+
+    case "thread.turn-enqueued":
+      return decodeForEvent(ThreadTurnEnqueuedPayload, event.payload, event.type, "payload").pipe(
+        Effect.map((payload) => {
+          const thread = nextBase.threads.find((entry) => entry.id === payload.threadId);
+          if (!thread) {
+            return nextBase;
+          }
+
+          const queuedTurns = [
+            ...thread.queuedTurns.filter(
+              (entry) => entry.queueEntryId !== payload.queuedTurn.queueEntryId,
+            ),
+            payload.queuedTurn,
+          ].toSorted(
+            (left, right) =>
+              left.createdAt.localeCompare(right.createdAt) ||
+              left.queueEntryId.localeCompare(right.queueEntryId),
+          );
+
+          return {
+            ...nextBase,
+            threads: updateThread(nextBase.threads, payload.threadId, {
+              queuedTurns,
+              updatedAt: event.occurredAt,
+            }),
+          };
+        }),
+      );
+
+    case "thread.turn-queue-item-removed":
+      return decodeForEvent(
+        ThreadTurnQueueItemRemovedPayload,
+        event.payload,
+        event.type,
+        "payload",
+      ).pipe(
+        Effect.map((payload) => {
+          const thread = nextBase.threads.find((entry) => entry.id === payload.threadId);
+          if (!thread) {
+            return nextBase;
+          }
+
+          return {
+            ...nextBase,
+            threads: updateThread(nextBase.threads, payload.threadId, {
+              queuedTurns: thread.queuedTurns.filter(
+                (entry) => entry.queueEntryId !== payload.queueEntryId,
+              ),
+              updatedAt: event.occurredAt,
+            }),
+          };
+        }),
+      );
+
+    case "thread.token-usage-updated":
+      return decodeForEvent(
+        ThreadTokenUsageUpdatedPayload,
+        event.payload,
+        event.type,
+        "payload",
+      ).pipe(
+        Effect.map((payload) => ({
+          ...nextBase,
+          threads: updateThread(nextBase.threads, payload.threadId, {
+            tokenUsage: payload.tokenUsage,
+            updatedAt: event.occurredAt,
+          }),
+        })),
+      );
 
     case "thread.session-set":
       return Effect.gen(function* () {
@@ -577,6 +652,7 @@ export function projectEvent(
             threads: updateThread(nextBase.threads, payload.threadId, {
               checkpoints,
               messages,
+              queuedTurns: [],
               proposedPlans,
               activities,
               latestTurn,

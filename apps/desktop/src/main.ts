@@ -57,12 +57,12 @@ const BACKEND_RESTART_CHANNEL = "desktop:backend-restart";
 const OPEN_LOG_DIRECTORY_CHANNEL = "desktop:open-log-directory";
 const SHOW_NOTIFICATION_CHANNEL = "desktop:show-notification";
 const STATE_DIR =
-  process.env.T3CODE_STATE_DIR?.trim() || Path.join(OS.homedir(), ".t3", "userdata");
-const DESKTOP_SCHEME = "t3";
+  process.env.OSSCODE_STATE_DIR?.trim() || Path.join(OS.homedir(), ".t3", "userdata");
+const DESKTOP_SCHEME = "osscode";
 const ROOT_DIR = Path.resolve(__dirname, "../../..");
 const isDevelopment = Boolean(process.env.VITE_DEV_SERVER_URL);
-const APP_DISPLAY_NAME = isDevelopment ? "T3 Code (Dev)" : "T3 Code (Alpha)";
-const APP_USER_MODEL_ID = "com.t3tools.t3code";
+const APP_DISPLAY_NAME = isDevelopment ? "OSSCode (Dev)" : "OSSCode (Alpha)";
+const APP_USER_MODEL_ID = "com.t3tools.osscode";
 const COMMIT_HASH_PATTERN = /^[0-9a-f]{7,40}$/i;
 const COMMIT_HASH_DISPLAY_LENGTH = 12;
 const LOG_DIR = Path.join(STATE_DIR, "logs");
@@ -324,8 +324,8 @@ function resolveEmbeddedCommitHash(): string | null {
 
   try {
     const raw = FS.readFileSync(packageJsonPath, "utf8");
-    const parsed = JSON.parse(raw) as { t3codeCommitHash?: unknown };
-    return normalizeCommitHash(parsed.t3codeCommitHash);
+    const parsed = JSON.parse(raw) as { osscodeCommitHash?: unknown };
+    return normalizeCommitHash(parsed.osscodeCommitHash);
   } catch {
     return null;
   }
@@ -336,7 +336,7 @@ function resolveAboutCommitHash(): string | null {
     return aboutCommitHashCache;
   }
 
-  const envCommitHash = normalizeCommitHash(process.env.T3CODE_COMMIT_HASH);
+  const envCommitHash = normalizeCommitHash(process.env.OSSCODE_COMMIT_HASH);
   if (envCommitHash) {
     aboutCommitHashCache = envCommitHash;
     return aboutCommitHashCache;
@@ -420,7 +420,7 @@ function handleFatalStartupError(stage: string, error: unknown): void {
   console.error(`[desktop] fatal startup error (${stage})`, error);
   if (!isQuitting) {
     isQuitting = true;
-    dialog.showErrorBox("T3 Code failed to start", `Stage: ${stage}\n${message}${detail}`);
+    dialog.showErrorBox("OSSCode failed to start", `Stage: ${stage}\n${message}${detail}`);
   }
   stopBackend();
   restoreStdIoCapture?.();
@@ -498,7 +498,7 @@ function handleCheckForUpdatesMenuClick(): void {
     isPackaged: app.isPackaged,
     platform: process.platform,
     appImage: process.env.APPIMAGE,
-    disabledByEnv: process.env.T3CODE_DISABLE_AUTO_UPDATE === "1",
+    disabledByEnv: process.env.OSSCODE_DISABLE_AUTO_UPDATE === "1",
   });
   if (disabledReason) {
     console.info("[desktop-updater] Manual update check requested, but updates are disabled.");
@@ -700,7 +700,7 @@ function shouldEnableAutoUpdates(): boolean {
       isPackaged: app.isPackaged,
       platform: process.platform,
       appImage: process.env.APPIMAGE,
-      disabledByEnv: process.env.T3CODE_DISABLE_AUTO_UPDATE === "1",
+      disabledByEnv: process.env.OSSCODE_DISABLE_AUTO_UPDATE === "1",
     }) === null
   );
 }
@@ -782,7 +782,7 @@ function configureAutoUpdater(): void {
   updaterConfigured = true;
 
   const githubToken =
-    process.env.T3CODE_DESKTOP_UPDATE_GITHUB_TOKEN?.trim() ||
+    process.env.OSSCODE_DESKTOP_UPDATE_GITHUB_TOKEN?.trim() ||
     process.env.GH_TOKEN?.trim() ||
     "";
   if (githubToken) {
@@ -876,11 +876,11 @@ function configureAutoUpdater(): void {
 function backendEnv(): NodeJS.ProcessEnv {
   return {
     ...process.env,
-    T3CODE_MODE: "desktop",
-    T3CODE_NO_BROWSER: "1",
-    T3CODE_PORT: String(backendPort),
-    T3CODE_STATE_DIR: STATE_DIR,
-    T3CODE_AUTH_TOKEN: backendAuthToken,
+    OSSCODE_MODE: "desktop",
+    OSSCODE_NO_BROWSER: "1",
+    OSSCODE_PORT: String(backendPort),
+    OSSCODE_STATE_DIR: STATE_DIR,
+    OSSCODE_AUTH_TOKEN: backendAuthToken,
   };
 }
 
@@ -1352,7 +1352,7 @@ async function bootstrap(): Promise<void> {
   writeDesktopLogHeader(`reserved backend port via NetService port=${backendPort}`);
   backendAuthToken = Crypto.randomBytes(24).toString("hex");
   backendWsUrl = `ws://127.0.0.1:${backendPort}/?token=${encodeURIComponent(backendAuthToken)}`;
-  process.env.T3CODE_DESKTOP_WS_URL = backendWsUrl;
+  process.env.OSSCODE_DESKTOP_WS_URL = backendWsUrl;
   writeDesktopLogHeader(`bootstrap resolved websocket url=${backendWsUrl}`);
 
   registerIpcHandlers();

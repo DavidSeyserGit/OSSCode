@@ -23,7 +23,7 @@ export interface AppState {
   threadsHydrated: boolean;
 }
 
-const PERSISTED_STATE_KEY = "t3code:renderer-state:v8";
+const PERSISTED_STATE_KEY = "osscode:renderer-state:v8";
 const LEGACY_PERSISTED_STATE_KEYS = [
   "t3code:renderer-state:v6",
   "t3code:renderer-state:v5",
@@ -280,6 +280,7 @@ export function syncServerReadModel(state: AppState, readModel: OrchestrationRea
         error: thread.session?.lastError ?? null,
         createdAt: thread.createdAt,
         latestTurn: thread.latestTurn,
+        tokenUsage: thread.tokenUsage ?? null,
         lastVisitedAt: existing?.lastVisitedAt ?? thread.updatedAt,
         branch: thread.branch,
         worktreePath: thread.worktreePath,
@@ -293,6 +294,13 @@ export function syncServerReadModel(state: AppState, readModel: OrchestrationRea
           files: checkpoint.files.map((file) => ({ ...file })),
         })),
         activities: thread.activities.map((activity) => ({ ...activity })),
+        queuedTurns: thread.queuedTurns.map((queuedTurn) => ({
+          ...queuedTurn,
+          message: {
+            ...queuedTurn.message,
+            attachments: queuedTurn.message.attachments.map((attachment) => ({ ...attachment })),
+          },
+        })),
       };
     });
   return {

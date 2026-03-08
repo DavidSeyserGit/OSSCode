@@ -1,6 +1,6 @@
 {
   "name": "@t3tools/shared",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "private": true,
   "type": "module",
   "exports": {
@@ -23,6 +23,10 @@
     "./Net": {
       "types": "./src/Net.ts",
       "import": "./src/Net.ts"
+    },
+    "./tokenUsage": {
+      "types": "./src/tokenUsage.ts",
+      "import": "./src/tokenUsage.ts"
     }
   },
   "scripts": {

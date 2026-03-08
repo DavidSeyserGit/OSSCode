@@ -4,7 +4,9 @@ import {
   MessageId,
   NonNegativeInt,
   OrchestrationCheckpointFile,
+  OrchestrationQueuedTurn,
   OrchestrationReadModel,
+  OrchestrationTokenUsage,
   ProjectScript,
   TurnId,
   type OrchestrationCheckpointSummary,
@@ -53,7 +55,12 @@ const ProjectionThreadMessageDbRowSchema = ProjectionThreadMessage.mapFields(
   }),
 );
 const ProjectionThreadProposedPlanDbRowSchema = ProjectionThreadProposedPlan;
-const ProjectionThreadDbRowSchema = ProjectionThread;
+const ProjectionThreadDbRowSchema = ProjectionThread.mapFields(
+  Struct.assign({
+    tokenUsage: Schema.NullOr(Schema.fromJsonString(OrchestrationTokenUsage)),
+    queuedTurns: Schema.fromJsonString(Schema.Array(OrchestrationQueuedTurn)),
+  }),
+);
 const ProjectionThreadActivityDbRowSchema = ProjectionThreadActivity.mapFields(
   Struct.assign({
     payload: Schema.fromJsonString(Schema.Unknown),
@@ -162,6 +169,8 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
           branch,
           worktree_path AS "worktreePath",
           latest_turn_id AS "latestTurnId",
+          token_usage_json AS "tokenUsage",
+          queued_turns_json AS "queuedTurns",
           created_at AS "createdAt",
           updated_at AS "updatedAt",
           deleted_at AS "deletedAt"
@@ -534,10 +543,12 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
             branch: row.branch,
             worktreePath: row.worktreePath,
             latestTurn: latestTurnByThread.get(row.threadId) ?? null,
+            tokenUsage: row.tokenUsage,
             createdAt: row.createdAt,
             updatedAt: row.updatedAt,
             deletedAt: row.deletedAt,
             messages: messagesByThread.get(row.threadId) ?? [],
+            queuedTurns: row.queuedTurns,
             proposedPlans: proposedPlansByThread.get(row.threadId) ?? [],
             activities: activitiesByThread.get(row.threadId) ?? [],
             checkpoints: checkpointsByThread.get(row.threadId) ?? [],

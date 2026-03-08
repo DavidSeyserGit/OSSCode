@@ -1,5 +1,7 @@
 import type {
   OrchestrationLatestTurn,
+  OrchestrationQueuedTurn,
+  OrchestrationTokenUsage,
   OrchestrationProposedPlanId,
   OrchestrationSessionStatus,
   OrchestrationThreadActivity,
@@ -97,11 +99,13 @@ export interface Thread {
   error: string | null;
   createdAt: string;
   latestTurn: OrchestrationLatestTurn | null;
+  tokenUsage: OrchestrationTokenUsage | null;
   lastVisitedAt?: string | undefined;
   branch: string | null;
   worktreePath: string | null;
   turnDiffSummaries: TurnDiffSummary[];
   activities: OrchestrationThreadActivity[];
+  queuedTurns: OrchestrationQueuedTurn[];
 }
 
 export interface ThreadSession {

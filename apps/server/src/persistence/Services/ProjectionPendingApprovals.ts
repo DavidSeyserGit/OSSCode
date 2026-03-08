@@ -88,4 +88,4 @@ export interface ProjectionPendingApprovalRepositoryShape {
 export class ProjectionPendingApprovalRepository extends ServiceMap.Service<
   ProjectionPendingApprovalRepository,
   ProjectionPendingApprovalRepositoryShape
->()("t3/persistence/Services/ProjectionPendingApprovals/ProjectionPendingApprovalRepository") {}
+>()("osscode/persistence/Services/ProjectionPendingApprovals/ProjectionPendingApprovalRepository") {}

@@ -17,6 +17,7 @@ import {
   type ProviderKind,
   type ReasoningEffort,
   type ThreadId,
+  type OrchestrationTokenUsage,
   type TurnId,
   OrchestrationThreadActivity,
   RuntimeMode,
@@ -34,6 +35,7 @@ import {
   resolveModelSlugForProvider,
   supportsReasoningEffortForModel,
 } from "@t3tools/shared/model";
+import { sumTokenUsage } from "@t3tools/shared/tokenUsage";
 import {
   type ReactElement,
   memo,
@@ -73,7 +75,6 @@ import {
   derivePendingApprovals,
   derivePendingUserInputs,
   derivePhase,
-  deriveQueuedTurnReplayAction,
   deriveTimelineEntries,
   deriveActiveWorkStartedAt,
   deriveActivePlanState,
@@ -193,7 +194,6 @@ import {
   CopyIcon,
   CheckIcon,
   ZapIcon,
-  PencilIcon,
   SendIcon,
 } from "lucide-react";
 import { Button } from "./ui/button";
@@ -302,8 +302,25 @@ function formatWorkingTimer(startIso: string, endIso: string): string | null {
   return seconds > 0 ? `${minutes}m ${seconds}s` : `${minutes}m`;
 }
 
-const LAST_EDITOR_KEY = "t3code:last-editor";
-const LAST_INVOKED_SCRIPT_BY_PROJECT_KEY = "t3code:last-invoked-script-by-project";
+function formatCompactTokenCount(value: number): string {
+  return new Intl.NumberFormat("en-US", {
+    notation: "compact",
+    maximumFractionDigits: value >= 100_000 ? 0 : 1,
+  }).format(value);
+}
+
+function formatFullTokenCount(value: number): string {
+  return new Intl.NumberFormat("en-US").format(value);
+}
+
+function hasTrackedTokenUsage(
+  usage: OrchestrationTokenUsage | null | undefined,
+): usage is OrchestrationTokenUsage {
+  return !!usage && usage.totalTokens > 0;
+}
+
+const LAST_EDITOR_KEY = "osscode:last-editor";
+const LAST_INVOKED_SCRIPT_BY_PROJECT_KEY = "osscode:last-invoked-script-by-project";
 const MAX_VISIBLE_WORK_LOG_ENTRIES = 6;
 const ALWAYS_UNVIRTUALIZED_TAIL_ROWS = 8;
 const ATTACHMENT_PREVIEW_HANDOFF_TTL_MS = 5000;
@@ -371,12 +388,6 @@ interface ExpandedImagePreview {
   index: number;
 }
 
-type QueuedComposerMessage = {
-  text: string;
-  images: ComposerImageAttachment[];
-  afterTurnId: TurnId | null;
-};
-
 function buildExpandedImagePreview(
   images: ReadonlyArray<{ id: string; name: string; previewUrl?: string }>,
   selectedImageId: string,
@@ -416,11 +427,13 @@ function buildLocalDraftThread(
     error,
     createdAt: draftThread.createdAt,
     latestTurn: null,
+    tokenUsage: null,
     lastVisitedAt: draftThread.createdAt,
     branch: draftThread.branch,
     worktreePath: draftThread.worktreePath,
     turnDiffSummaries: [],
     activities: [],
+    queuedTurns: [],
     proposedPlans: [],
   };
 }
@@ -516,11 +529,11 @@ function cloneComposerImageForRetry(image: ComposerImageAttachment): ComposerIma
   }
 }
 
-function queuedMessageSummary(message: Pick<QueuedComposerMessage, "text" | "images">): string {
-  if (message.text) {
-    return message.text;
+function queuedTurnSummary(thread: Pick<Thread, "queuedTurns">["queuedTurns"][number]): string {
+  if (thread.message.text) {
+    return thread.message.text;
   }
-  const imageCount = message.images.length;
+  const imageCount = thread.message.attachments.length;
   if (imageCount <= 1) {
     return "Image";
   }
@@ -709,14 +722,8 @@ export default function ChatView({ threadId }: ChatViewProps) {
   >({});
   const [sendPhase, setSendPhase] = useState<SendPhase>("idle");
   const [sendStartedAt, setSendStartedAt] = useState<string | null>(null);
-  const [queuedMessage, setQueuedMessage] = useState<QueuedComposerMessage | null>(null);
   const [isConnecting, _setIsConnecting] = useState(false);
   const [isRevertingCheckpoint, setIsRevertingCheckpoint] = useState(false);
-  const [queuedFollowUp, setQueuedFollowUp] = useState<{
-    text: string;
-    images: ComposerImageAttachment[];
-  } | null>(null);
-  const autoSubmitPendingRef = useRef(false);
   const [respondingRequestIds, setRespondingRequestIds] = useState<ApprovalRequestId[]>([]);
   const [respondingUserInputRequestIds, setRespondingUserInputRequestIds] = useState<
     ApprovalRequestId[]
@@ -841,6 +848,11 @@ export default function ChatView({ threadId }: ChatViewProps) {
   const diffOpen = diffSearch.diff === "1";
   const activeThreadId = activeThread?.id ?? null;
   const activeLatestTurn = activeThread?.latestTurn ?? null;
+  const activeThreadTokenUsage = activeThread?.tokenUsage ?? null;
+  const trackedTokenUsage = useMemo(
+    () => sumTokenUsage(threads.map((thread) => thread.tokenUsage)),
+    [threads],
+  );
   const latestTurnSettled = isLatestTurnSettled(activeLatestTurn, activeThread?.session ?? null);
   const activeProject = projects.find((p) => p.id === activeThread?.projectId);
 
@@ -979,6 +991,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
     sendStartedAt,
   );
   const threadActivities = activeThread?.activities ?? EMPTY_ACTIVITIES;
+  const queuedTurns = activeThread?.queuedTurns ?? [];
   const workLogEntries = useMemo(
     () => deriveWorkLogEntries(threadActivities, activeLatestTurn?.turnId ?? undefined),
     [activeLatestTurn?.turnId, threadActivities],
@@ -1052,29 +1065,6 @@ export default function ChatView({ threadId }: ChatViewProps) {
     isComposerApprovalState ||
     pendingUserInputs.length > 0 ||
     (showPlanFollowUpPrompt && activeProposedPlan !== null);
-  const isQueuedComposerLocked = phase === "running" && queuedMessage !== null;
-  const queuedTurnReplayAction = deriveQueuedTurnReplayAction({
-    queuedAfterTurnId: queuedMessage?.afterTurnId ?? null,
-    phase,
-    latestTurn: activeLatestTurn
-      ? {
-          turnId: activeLatestTurn.turnId,
-          state: activeLatestTurn.state,
-        }
-      : null,
-    latestTurnSettled,
-    session: activeThread?.session
-      ? {
-          status: activeThread.session.status,
-          activeTurnId: activeThread.session.activeTurnId,
-        }
-      : null,
-    isSendBusy,
-    isConnecting,
-    sendInFlight: sendInFlightRef.current,
-    hasPendingApproval: activePendingApproval !== null,
-    hasPendingUserInput: activePendingUserInput !== null,
-  });
   useEffect(() => {
     if (!activePendingProgress) {
       return;
@@ -2288,29 +2278,6 @@ export default function ChatView({ threadId }: ChatViewProps) {
     sendPhase,
   ]);
 
-  // Track phase transitions to auto-send queued follow-up when generation finishes
-  const prevPhaseRef = useRef(phase);
-  useEffect(() => {
-    const prevPhase = prevPhaseRef.current;
-    prevPhaseRef.current = phase;
-    if (prevPhase === "running" && phase !== "running" && queuedFollowUp) {
-      setPrompt(queuedFollowUp.text);
-      if (queuedFollowUp.images.length > 0) {
-        addComposerImagesToDraft(queuedFollowUp.images);
-      }
-      setQueuedFollowUp(null);
-      autoSubmitPendingRef.current = true;
-    }
-  }, [phase, queuedFollowUp, setPrompt, addComposerImagesToDraft]);
-
-  // Submit the form once the queued prompt has been restored to the composer
-  useEffect(() => {
-    if (autoSubmitPendingRef.current && prompt.trim() && phase !== "running" && !isSendBusy) {
-      autoSubmitPendingRef.current = false;
-      composerFormRef.current?.requestSubmit();
-    }
-  }, [prompt, phase, isSendBusy]);
-
   useEffect(() => {
     if (!activeThreadId) return;
     const previous = terminalOpenByThreadRef.current[activeThreadId] ?? false;
@@ -2419,7 +2386,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
   ]);
 
   const addComposerImages = (files: File[]) => {
-    if (!activeThreadId || files.length === 0 || isQueuedComposerLocked) return;
+    if (!activeThreadId || files.length === 0) return;
 
     const nextImages: ComposerImageAttachment[] = [];
     let nextImageCount = composerImagesRef.current.length;
@@ -2460,14 +2427,10 @@ export default function ChatView({ threadId }: ChatViewProps) {
   };
 
   const removeComposerImage = (imageId: string) => {
-    if (isQueuedComposerLocked) return;
     removeComposerImageFromDraft(imageId);
   };
 
   const onComposerPaste = (event: React.ClipboardEvent<HTMLElement>) => {
-    if (isQueuedComposerLocked) {
-      return;
-    }
     const files = Array.from(event.clipboardData.files);
     if (files.length === 0) {
       return;
@@ -2481,9 +2444,6 @@ export default function ChatView({ threadId }: ChatViewProps) {
   };
 
   const onComposerDragEnter = (event: React.DragEvent<HTMLDivElement>) => {
-    if (isQueuedComposerLocked) {
-      return;
-    }
     if (!event.dataTransfer.types.includes("Files")) {
       return;
     }
@@ -2493,9 +2453,6 @@ export default function ChatView({ threadId }: ChatViewProps) {
   };
 
   const onComposerDragOver = (event: React.DragEvent<HTMLDivElement>) => {
-    if (isQueuedComposerLocked) {
-      return;
-    }
     if (!event.dataTransfer.types.includes("Files")) {
       return;
     }
@@ -2505,9 +2462,6 @@ export default function ChatView({ threadId }: ChatViewProps) {
   };
 
   const onComposerDragLeave = (event: React.DragEvent<HTMLDivElement>) => {
-    if (isQueuedComposerLocked) {
-      return;
-    }
     if (!event.dataTransfer.types.includes("Files")) {
       return;
     }
@@ -2523,9 +2477,6 @@ export default function ChatView({ threadId }: ChatViewProps) {
   };
 
   const onComposerDrop = (event: React.DragEvent<HTMLDivElement>) => {
-    if (isQueuedComposerLocked) {
-      return;
-    }
     if (!event.dataTransfer.types.includes("Files")) {
       return;
     }
@@ -2592,17 +2543,6 @@ export default function ChatView({ threadId }: ChatViewProps) {
     const effectivePrompt = override?.text ?? prompt;
     const effectiveImages = override?.images ?? composerImages;
     const trimmed = effectivePrompt.trim();
-    // Queue the message if the model is currently generating
-    if (phase === "running") {
-      if (!trimmed && effectiveImages.length === 0) return;
-      setQueuedFollowUp({ text: trimmed, images: [...effectiveImages] });
-      promptRef.current = "";
-      clearComposerDraftContent(activeThread.id);
-      setComposerHighlightedItemId(null);
-      setComposerCursor(0);
-      setComposerTrigger(null);
-      return;
-    }
     if (showPlanFollowUpPrompt && activeProposedPlan) {
       const followUp = resolvePlanFollowUpSubmission({
         draftText: trimmed,
@@ -2635,6 +2575,11 @@ export default function ChatView({ threadId }: ChatViewProps) {
     if (!trimmed && effectiveImages.length === 0) return;
     if (!activeProject) return;
     const threadIdForSend = activeThread.id;
+    const shouldOptimisticallyRenderUserMessage =
+      activeThread.session?.status !== "connecting" &&
+      phase !== "running" &&
+      activePendingApproval === null &&
+      activePendingUserInput === null;
     const isFirstMessage = !isServerThread || activeThread.messages.length === 0;
     const baseBranchForWorktree =
       isFirstMessage && envMode === "worktree" && !activeThread.worktreePath
@@ -2676,17 +2621,19 @@ export default function ChatView({ threadId }: ChatViewProps) {
       sizeBytes: image.sizeBytes,
       previewUrl: image.previewUrl,
     }));
-    setOptimisticUserMessages((existing) => [
-      ...existing,
-      {
-        id: messageIdForSend,
-        role: "user",
-        text: trimmed,
-        ...(optimisticAttachments.length > 0 ? { attachments: optimisticAttachments } : {}),
-        createdAt: messageCreatedAt,
-        streaming: false,
-      },
-    ]);
+    if (shouldOptimisticallyRenderUserMessage) {
+      setOptimisticUserMessages((existing) => [
+        ...existing,
+        {
+          id: messageIdForSend,
+          role: "user",
+          text: trimmed,
+          ...(optimisticAttachments.length > 0 ? { attachments: optimisticAttachments } : {}),
+          createdAt: messageCreatedAt,
+          streaming: false,
+        },
+      ]);
+    }
     // Sending a message should always bring the latest user turn into view.
     shouldAutoScrollRef.current = true;
     forceStickToBottom();
@@ -2852,14 +2799,16 @@ export default function ChatView({ threadId }: ChatViewProps) {
         promptRef.current.length === 0 &&
         composerImagesRef.current.length === 0
       ) {
-        setOptimisticUserMessages((existing) => {
-          const removed = existing.filter((message) => message.id === messageIdForSend);
-          for (const message of removed) {
-            revokeUserMessagePreviewUrls(message);
-          }
-          const next = existing.filter((message) => message.id !== messageIdForSend);
-          return next.length === existing.length ? existing : next;
-        });
+        if (shouldOptimisticallyRenderUserMessage) {
+          setOptimisticUserMessages((existing) => {
+            const removed = existing.filter((message) => message.id === messageIdForSend);
+            for (const message of removed) {
+              revokeUserMessagePreviewUrls(message);
+            }
+            const next = existing.filter((message) => message.id !== messageIdForSend);
+            return next.length === existing.length ? existing : next;
+          });
+        }
         promptRef.current = trimmed;
         setPrompt(trimmed);
         setComposerCursor(trimmed.length);
@@ -2879,37 +2828,6 @@ export default function ChatView({ threadId }: ChatViewProps) {
 
   onSendRef.current = onSend;
 
-  useEffect(() => {
-    if (!queuedMessage || queuedTurnReplayAction === "wait") {
-      return;
-    }
-
-    setQueuedMessage(null);
-    if (queuedTurnReplayAction === "restore") {
-      promptRef.current = queuedMessage.text;
-      setPrompt(queuedMessage.text);
-      addComposerImagesToDraft(queuedMessage.images.map(cloneComposerImageForRetry));
-      setComposerCursor(queuedMessage.text.length);
-      setComposerTrigger(detectComposerTrigger(queuedMessage.text, queuedMessage.text.length));
-      return;
-    }
-
-    void onSendRef.current(undefined, {
-      text: queuedMessage.text,
-      images: queuedMessage.images,
-    });
-  }, [
-    addComposerImagesToDraft,
-    queuedMessage,
-    queuedTurnReplayAction,
-    setPrompt,
-  ]);
-
-  // Clear queued message when switching threads.
-  useEffect(() => {
-    setQueuedMessage(null);
-  }, [activeThreadId]);
-
   const onInterrupt = async () => {
     const api = readNativeApi();
     if (!api || !activeThread) return;
@@ -2920,6 +2838,22 @@ export default function ChatView({ threadId }: ChatViewProps) {
       createdAt: new Date().toISOString(),
     });
   };
+
+  const onCancelQueuedTurn = useCallback(
+    async (queueEntryId: string) => {
+      const api = readNativeApi();
+      if (!api || !activeThread) return;
+
+      await api.orchestration.dispatchCommand({
+        type: "thread.turn.queue.remove",
+        commandId: newCommandId(),
+        threadId: activeThread.id,
+        queueEntryId,
+        createdAt: new Date().toISOString(),
+      });
+    },
+    [activeThread],
+  );
 
   const onRespondToApproval = useCallback(
     async (requestId: ApprovalRequestId, decision: ProviderApprovalDecision) => {
@@ -3502,9 +3436,6 @@ export default function ChatView({ threadId }: ChatViewProps) {
         );
         return;
       }
-      if (isQueuedComposerLocked) {
-        return;
-      }
       promptRef.current = nextPrompt;
       setPrompt(nextPrompt);
       setComposerCursor(nextCursor);
@@ -3520,7 +3451,6 @@ export default function ChatView({ threadId }: ChatViewProps) {
     [
       activePendingProgress?.activeQuestion,
       activePendingUserInput,
-      isQueuedComposerLocked,
       onChangeActivePendingUserInputCustomAnswer,
       setPrompt,
     ],
@@ -3630,6 +3560,8 @@ export default function ChatView({ threadId }: ChatViewProps) {
           activeThreadId={activeThread.id}
           activeThreadTitle={activeThread.title}
           activeProjectName={activeProject?.name}
+          activeThreadTokenUsage={activeThreadTokenUsage}
+          trackedTokenUsage={trackedTokenUsage}
           isGitRepo={isGitRepo}
           openInCwd={activeThread.worktreePath ?? activeProject?.cwd ?? null}
           activeProjectScripts={activeProject?.scripts}
@@ -3697,54 +3629,48 @@ export default function ChatView({ threadId }: ChatViewProps) {
 
       {/* Input bar */}
       <div className={cn("px-3 pt-1.5 sm:px-5 sm:pt-2", isGitRepo ? "pb-1" : "pb-3 sm:pb-4")}>
-        {/* Queued follow-up banner */}
-        {queuedFollowUp ? (
+        {queuedTurns.length > 0 ? (
           <div className="mx-auto mb-2 w-full min-w-0 max-w-3xl">
-            <div className="rounded-[14px] border border-border bg-card px-3 py-2">
+            <div className="overflow-hidden rounded-[14px] border border-border bg-card">
               <div className="mb-1.5 flex items-center justify-between">
-                <span className="text-xs font-medium text-muted-foreground">1 Queued</span>
-                <div className="flex items-center gap-1">
-                  {/* Edit: restore to composer */}
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="icon-xs"
-                    aria-label="Edit queued message"
-                    onClick={() => {
-                      setPrompt(queuedFollowUp.text);
-                      if (queuedFollowUp.images.length > 0) {
-                        addComposerImagesToDraft(queuedFollowUp.images);
-                      }
-                      setQueuedFollowUp(null);
-                    }}
-                  >
-                    <PencilIcon className="size-3" />
-                  </Button>
-                  {/* Send now: interrupt + auto-send */}
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="icon-xs"
-                    aria-label="Send queued message now"
-                    onClick={() => {
-                      void onInterrupt();
-                    }}
-                  >
-                    <SendIcon className="size-3" />
-                  </Button>
-                  {/* Discard */}
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="icon-xs"
-                    aria-label="Discard queued message"
-                    onClick={() => setQueuedFollowUp(null)}
-                  >
-                    <XIcon className="size-3" />
-                  </Button>
-                </div>
+                <span className="px-3 pt-2 text-xs font-medium text-muted-foreground">
+                  {queuedTurns.length === 1 ? "1 queued prompt" : `${queuedTurns.length} queued prompts`}
+                </span>
               </div>
-              <p className="line-clamp-2 text-sm text-foreground/80">{queuedFollowUp.text}</p>
+              <div className="divide-y divide-border/60">
+                {queuedTurns.map((queuedTurn) => (
+                  <div
+                    key={queuedTurn.queueEntryId}
+                    className="flex items-center gap-3 px-3 py-2.5 text-sm text-foreground/90"
+                  >
+                    <span
+                      aria-hidden="true"
+                      className="size-2 shrink-0 rounded-full border border-muted-foreground/50"
+                    />
+                    <div className="min-w-0 flex-1">
+                      <p className="truncate">{queuedTurnSummary(queuedTurn)}</p>
+                      {queuedTurn.message.attachments.length > 0 ? (
+                        <p className="mt-0.5 text-[11px] text-muted-foreground/70">
+                          {queuedTurn.message.attachments.length === 1
+                            ? "1 image"
+                            : `${queuedTurn.message.attachments.length} images`}
+                        </p>
+                      ) : null}
+                    </div>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="icon-xs"
+                      aria-label="Cancel queued prompt"
+                      onClick={() => {
+                        void onCancelQueuedTurn(queuedTurn.queueEntryId);
+                      }}
+                    >
+                      <XIcon className="size-3.5" />
+                    </Button>
+                  </div>
+                ))}
+              </div>
             </div>
           </div>
         ) : null}
@@ -3876,37 +3802,6 @@ export default function ChatView({ threadId }: ChatViewProps) {
                   ))}
                 </div>
               )}
-              {queuedMessage ? (
-                <div className="mb-3 overflow-hidden rounded-xl border border-border/70 bg-muted/25">
-                  <div className="flex items-center justify-between border-b border-border/60 px-3 py-2 text-[11px] text-muted-foreground/80">
-                    <span className="font-medium">1 Queued</span>
-                    <button
-                      type="button"
-                      className="rounded p-1 transition-colors hover:bg-muted/80 hover:text-foreground"
-                      onClick={() => setQueuedMessage(null)}
-                      aria-label="Cancel queued message"
-                    >
-                      <XIcon className="size-3.5" />
-                    </button>
-                  </div>
-                  <div className="flex items-center gap-2 px-3 py-2.5 text-sm text-foreground/90">
-                    <span
-                      aria-hidden="true"
-                      className="size-2 shrink-0 rounded-full border border-muted-foreground/50"
-                    />
-                    <span className="min-w-0 flex-1 truncate">
-                      {queuedMessageSummary(queuedMessage)}
-                    </span>
-                    {queuedMessage.images.length > 0 ? (
-                      <span className="shrink-0 text-[11px] text-muted-foreground/70">
-                        {queuedMessage.images.length === 1
-                          ? "1 image"
-                          : `${queuedMessage.images.length} images`}
-                      </span>
-                    ) : null}
-                  </div>
-                </div>
-              ) : null}
               <ComposerPromptEditor
                 ref={composerEditorRef}
                 value={
@@ -3933,7 +3828,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
                         ? "Ask for follow-up changes or attach images"
                         : "Ask anything, @tag files/folders, or use /model"
                 }
-                disabled={isConnecting || isComposerApprovalState || isQueuedComposerLocked}
+                disabled={isConnecting || isComposerApprovalState}
               />
             </div>
 
@@ -4302,6 +4197,8 @@ interface ChatHeaderProps {
   activeThreadId: ThreadId;
   activeThreadTitle: string;
   activeProjectName: string | undefined;
+  activeThreadTokenUsage: OrchestrationTokenUsage | null;
+  trackedTokenUsage: OrchestrationTokenUsage | null;
   isGitRepo: boolean;
   openInCwd: string | null;
   activeProjectScripts: ProjectScript[] | undefined;
@@ -4321,6 +4218,8 @@ const ChatHeader = memo(function ChatHeader({
   activeThreadId,
   activeThreadTitle,
   activeProjectName,
+  activeThreadTokenUsage,
+  trackedTokenUsage,
   isGitRepo,
   openInCwd,
   activeProjectScripts,
@@ -4355,6 +4254,52 @@ const ChatHeader = memo(function ChatHeader({
             No Git
           </Badge>
         )}
+        <Tooltip>
+          <TooltipTrigger
+            render={
+              <Badge
+                variant="outline"
+                className={cn(
+                  "shrink-0 font-mono tabular-nums",
+                  hasTrackedTokenUsage(activeThreadTokenUsage)
+                    ? "text-foreground"
+                    : "text-muted-foreground",
+                )}
+              >
+                {hasTrackedTokenUsage(activeThreadTokenUsage)
+                  ? `${formatCompactTokenCount(activeThreadTokenUsage.totalTokens)} tok`
+                  : "Tracking..."}
+              </Badge>
+            }
+          />
+          <TooltipPopup side="bottom">
+            {hasTrackedTokenUsage(activeThreadTokenUsage) ? (
+              <div className="space-y-1 text-xs">
+                <div>Thread: {formatFullTokenCount(activeThreadTokenUsage.totalTokens)} tokens</div>
+                <div>Input: {formatFullTokenCount(activeThreadTokenUsage.inputTokens)}</div>
+                <div>Output: {formatFullTokenCount(activeThreadTokenUsage.outputTokens)}</div>
+                {activeThreadTokenUsage.cachedInputTokens > 0 && (
+                  <div>
+                    Cached input: {formatFullTokenCount(activeThreadTokenUsage.cachedInputTokens)}
+                  </div>
+                )}
+                {activeThreadTokenUsage.reasoningTokens > 0 && (
+                  <div>
+                    Reasoning: {formatFullTokenCount(activeThreadTokenUsage.reasoningTokens)}
+                  </div>
+                )}
+                {trackedTokenUsage &&
+                  trackedTokenUsage.totalTokens > activeThreadTokenUsage.totalTokens && (
+                    <div>Tracked total: {formatFullTokenCount(trackedTokenUsage.totalTokens)}</div>
+                  )}
+              </div>
+            ) : (
+              <div className="max-w-56 text-xs text-muted-foreground">
+                Waiting for the provider to report token usage for this thread.
+              </div>
+            )}
+          </TooltipPopup>
+        </Tooltip>
       </div>
       <div className="@container/header-actions flex min-w-0 flex-1 items-center justify-end gap-2 @sm/header-actions:gap-3">
         {activeProjectScripts && (

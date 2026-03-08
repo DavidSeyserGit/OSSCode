@@ -79,10 +79,12 @@ describe("orchestration projector", () => {
         branch: null,
         worktreePath: null,
         latestTurn: null,
+        tokenUsage: null,
         createdAt: now,
         updatedAt: now,
         deletedAt: null,
         messages: [],
+        queuedTurns: [],
         proposedPlans: [],
         activities: [],
         checkpoints: [],
@@ -120,6 +122,71 @@ describe("orchestration projector", () => {
         ),
       ),
     ).rejects.toBeDefined();
+  });
+
+  it("applies thread.token-usage-updated events", async () => {
+    const now = "2026-03-08T00:00:00.000Z";
+    const updatedAt = "2026-03-08T00:01:00.000Z";
+    const model = createEmptyReadModel(now);
+
+    const afterCreate = await Effect.runPromise(
+      projectEvent(
+        model,
+        makeEvent({
+          sequence: 1,
+          type: "thread.created",
+          aggregateKind: "thread",
+          aggregateId: "thread-1",
+          occurredAt: now,
+          commandId: "cmd-thread-create",
+          payload: {
+            threadId: "thread-1",
+            projectId: "project-1",
+            title: "demo",
+            model: "gpt-5-codex",
+            runtimeMode: "full-access",
+            branch: null,
+            worktreePath: null,
+            createdAt: now,
+            updatedAt: now,
+          },
+        }),
+      ),
+    );
+
+    const next = await Effect.runPromise(
+      projectEvent(
+        afterCreate,
+        makeEvent({
+          sequence: 2,
+          type: "thread.token-usage-updated",
+          aggregateKind: "thread",
+          aggregateId: "thread-1",
+          occurredAt: updatedAt,
+          commandId: "cmd-thread-token-usage",
+          payload: {
+            threadId: "thread-1",
+            tokenUsage: {
+              inputTokens: 1200,
+              outputTokens: 300,
+              cachedInputTokens: 200,
+              reasoningTokens: 80,
+              totalTokens: 1500,
+              updatedAt,
+            },
+          },
+        }),
+      ),
+    );
+
+    expect(next.threads[0]?.tokenUsage).toEqual({
+      inputTokens: 1200,
+      outputTokens: 300,
+      cachedInputTokens: 200,
+      reasoningTokens: 80,
+      totalTokens: 1500,
+      updatedAt,
+    });
   });
 
   it("keeps projector forward-compatible for unhandled event types", async () => {

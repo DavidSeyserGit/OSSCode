@@ -7,5 +7,5 @@ export interface ProviderModelsShape {
 }
 
 export class ProviderModels extends ServiceMap.Service<ProviderModels, ProviderModelsShape>()(
-  "t3/provider/Services/ProviderModels",
+  "osscode/provider/Services/ProviderModels",
 ) {}

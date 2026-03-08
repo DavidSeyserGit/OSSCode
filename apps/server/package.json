@@ -1,13 +1,13 @@
 {
-  "name": "t3",
-  "version": "0.3.0",
+  "name": "osscode",
+  "version": "0.4.0",
   "repository": {
     "type": "git",
-    "url": "https://github.com/pingdotgg/t3code",
+    "url": "https://github.com/DavidSeyserGit/OSSCode",
     "directory": "apps/server"
   },
   "bin": {
-    "t3": "./dist/index.mjs"
+    "osscode": "./dist/index.mjs"
   },
   "files": [
     "dist"

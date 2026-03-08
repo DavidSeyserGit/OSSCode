@@ -18,4 +18,4 @@ export interface ClaudeCodeAdapterShape extends ProviderAdapterShape<ProviderAda
 export class ClaudeCodeAdapter extends ServiceMap.Service<
   ClaudeCodeAdapter,
   ClaudeCodeAdapterShape
->()("t3/provider/Services/ClaudeCodeAdapter") {}
+>()("osscode/provider/Services/ClaudeCodeAdapter") {}

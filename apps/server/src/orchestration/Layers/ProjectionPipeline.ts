@@ -239,6 +239,21 @@ function collectThreadAttachmentRelativePaths(
   return relativePaths;
 }
 
+function collectQueuedTurnAttachmentRelativePaths(
+  queuedTurns: ReadonlyArray<{ message: { attachments: ReadonlyArray<ChatAttachment> } }>,
+): Set<string> {
+  const relativePaths = new Set<string>();
+  for (const queuedTurn of queuedTurns) {
+    for (const attachment of queuedTurn.message.attachments) {
+      if (attachment.type !== "image") {
+        continue;
+      }
+      relativePaths.add(attachmentRelativePath(attachment));
+    }
+  }
+  return relativePaths;
+}
+
 const runAttachmentSideEffects = Effect.fn(function* (sideEffects: AttachmentSideEffects) {
   const serverConfig = yield* Effect.service(ServerConfig);
   const fileSystem = yield* Effect.service(FileSystem.FileSystem);
@@ -428,6 +443,8 @@ const makeOrchestrationProjectionPipeline = Effect.gen(function* () {
             branch: event.payload.branch,
             worktreePath: event.payload.worktreePath,
             latestTurnId: null,
+            tokenUsage: null,
+            queuedTurns: [],
             createdAt: event.payload.createdAt,
             updatedAt: event.payload.updatedAt,
             deletedAt: null,
@@ -500,6 +517,63 @@ const makeOrchestrationProjectionPipeline = Effect.gen(function* () {
           return;
         }
 
+        case "thread.turn-enqueued": {
+          const existingRow = yield* projectionThreadRepository.getById({
+            threadId: event.payload.threadId,
+          });
+          if (Option.isNone(existingRow)) {
+            return;
+          }
+          yield* projectionThreadRepository.upsert({
+            ...existingRow.value,
+            queuedTurns: [
+              ...existingRow.value.queuedTurns.filter(
+                (entry) => entry.queueEntryId !== event.payload.queuedTurn.queueEntryId,
+              ),
+              event.payload.queuedTurn,
+            ].toSorted(
+              (left, right) =>
+                left.createdAt.localeCompare(right.createdAt) ||
+                left.queueEntryId.localeCompare(right.queueEntryId),
+            ),
+            updatedAt: event.occurredAt,
+          });
+          return;
+        }
+
+        case "thread.turn-queue-item-removed": {
+          const existingRow = yield* projectionThreadRepository.getById({
+            threadId: event.payload.threadId,
+          });
+          if (Option.isNone(existingRow)) {
+            return;
+          }
+          const removedQueuedTurn = existingRow.value.queuedTurns.find(
+            (entry) => entry.queueEntryId === event.payload.queueEntryId,
+          );
+          if (event.payload.reason !== "consumed" && removedQueuedTurn) {
+            const relativePaths = collectQueuedTurnAttachmentRelativePaths([removedQueuedTurn]);
+            if (relativePaths.size > 0) {
+              attachmentSideEffects.prunedThreadRelativePaths.set(
+                event.payload.threadId,
+                new Set([
+                  ...(attachmentSideEffects.prunedThreadRelativePaths.get(event.payload.threadId) ??
+                    new Set<string>()),
+                  ...relativePaths,
+                ]),
+              );
+            }
+          }
+          yield* projectionThreadRepository.upsert({
+            ...existingRow.value,
+            queuedTurns: existingRow.value.queuedTurns.filter(
+              (entry) => entry.queueEntryId !== event.payload.queueEntryId,
+            ),
+            updatedAt: event.occurredAt,
+          });
+          return;
+        }
+
         case "thread.message-sent":
         case "thread.proposed-plan-upserted":
         case "thread.activity-appended": {
@@ -511,6 +585,21 @@ const makeOrchestrationProjectionPipeline = Effect.gen(function* () {
           }
           yield* projectionThreadRepository.upsert({
             ...existingRow.value,
+            updatedAt: event.occurredAt,
+          });
+          return;
+        }
+
+        case "thread.token-usage-updated": {
+          const existingRow = yield* projectionThreadRepository.getById({
+            threadId: event.payload.threadId,
+          });
+          if (Option.isNone(existingRow)) {
+            return;
+          }
+          yield* projectionThreadRepository.upsert({
+            ...existingRow.value,
+            tokenUsage: event.payload.tokenUsage,
             updatedAt: event.occurredAt,
           });
           return;
@@ -553,9 +642,23 @@ const makeOrchestrationProjectionPipeline = Effect.gen(function* () {
           if (Option.isNone(existingRow)) {
             return;
           }
+          const queuedTurnRelativePaths = collectQueuedTurnAttachmentRelativePaths(
+            existingRow.value.queuedTurns,
+          );
+          if (queuedTurnRelativePaths.size > 0) {
+            attachmentSideEffects.prunedThreadRelativePaths.set(
+              event.payload.threadId,
+              new Set([
+                ...(attachmentSideEffects.prunedThreadRelativePaths.get(event.payload.threadId) ??
+                  new Set<string>()),
+                ...queuedTurnRelativePaths,
+              ]),
+            );
+          }
           yield* projectionThreadRepository.upsert({
             ...existingRow.value,
             latestTurnId: null,
+            queuedTurns: [],
             updatedAt: event.occurredAt,
           });
           return;

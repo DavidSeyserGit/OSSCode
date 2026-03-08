@@ -1,6 +1,7 @@
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 import * as SqlSchema from "effect/unstable/sql/SqlSchema";
-import { Effect, Layer } from "effect";
+import { Effect, Layer, Schema, Struct } from "effect";
+import { OrchestrationQueuedTurn, OrchestrationTokenUsage } from "@t3tools/contracts";
 
 import { toPersistenceSqlError } from "../Errors.ts";
 import {
@@ -11,6 +12,13 @@ import {
   ProjectionThreadRepository,
   type ProjectionThreadRepositoryShape,
 } from "../Services/ProjectionThreads.ts";
+
+const ProjectionThreadDbRowSchema = ProjectionThread.mapFields(
+  Struct.assign({
+    tokenUsage: Schema.NullOr(Schema.fromJsonString(OrchestrationTokenUsage)),
+    queuedTurns: Schema.fromJsonString(Schema.Array(OrchestrationQueuedTurn)),
+  }),
+);
 
 const makeProjectionThreadRepository = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
@@ -29,6 +37,8 @@ const makeProjectionThreadRepository = Effect.gen(function* () {
           branch,
           worktree_path,
           latest_turn_id,
+          token_usage_json,
+          queued_turns_json,
           created_at,
           updated_at,
           deleted_at
@@ -43,6 +53,8 @@ const makeProjectionThreadRepository = Effect.gen(function* () {
           ${row.branch},
           ${row.worktreePath},
           ${row.latestTurnId},
+          ${row.tokenUsage === null ? null : JSON.stringify(row.tokenUsage)},
+          ${JSON.stringify(row.queuedTurns)},
           ${row.createdAt},
           ${row.updatedAt},
           ${row.deletedAt}
@@ -57,6 +69,8 @@ const makeProjectionThreadRepository = Effect.gen(function* () {
           branch = excluded.branch,
           worktree_path = excluded.worktree_path,
           latest_turn_id = excluded.latest_turn_id,
+          token_usage_json = excluded.token_usage_json,
+          queued_turns_json = excluded.queued_turns_json,
           created_at = excluded.created_at,
           updated_at = excluded.updated_at,
           deleted_at = excluded.deleted_at
@@ -65,7 +79,7 @@ const makeProjectionThreadRepository = Effect.gen(function* () {
 
   const getProjectionThreadRow = SqlSchema.findOneOption({
     Request: GetProjectionThreadInput,
-    Result: ProjectionThread,
+    Result: ProjectionThreadDbRowSchema,
     execute: ({ threadId }) =>
       sql`
         SELECT
@@ -78,6 +92,8 @@ const makeProjectionThreadRepository = Effect.gen(function* () {
           branch,
           worktree_path AS "worktreePath",
           latest_turn_id AS "latestTurnId",
+          token_usage_json AS "tokenUsage",
+          queued_turns_json AS "queuedTurns",
           created_at AS "createdAt",
           updated_at AS "updatedAt",
           deleted_at AS "deletedAt"
@@ -88,7 +104,7 @@ const makeProjectionThreadRepository = Effect.gen(function* () {
 
   const listProjectionThreadRows = SqlSchema.findAll({
     Request: ListProjectionThreadsByProjectInput,
-    Result: ProjectionThread,
+    Result: ProjectionThreadDbRowSchema,
     execute: ({ projectId }) =>
       sql`
         SELECT
@@ -101,6 +117,8 @@ const makeProjectionThreadRepository = Effect.gen(function* () {
           branch,
           worktree_path AS "worktreePath",
           latest_turn_id AS "latestTurnId",
+          token_usage_json AS "tokenUsage",
+          queued_turns_json AS "queuedTurns",
           created_at AS "createdAt",
           updated_at AS "updatedAt",
           deleted_at AS "deletedAt"

@@ -195,7 +195,7 @@ export interface OpenShape {
 /**
  * Open - Service tag for browser/editor launch operations.
  */
-export class Open extends ServiceMap.Service<Open, OpenShape>()("t3/open") {}
+export class Open extends ServiceMap.Service<Open, OpenShape>()("osscode/open") {}
 
 // ==============================
 // Implementations

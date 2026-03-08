@@ -1,8 +1,6 @@
 # Keybindings
 
-T3 Code reads keybindings from:
-
-- `~/.t3/keybindings.json`
+OSSCode reads keybindings from the active state directory's `keybindings.json`.
 
 The file must be a JSON array of rules:
 

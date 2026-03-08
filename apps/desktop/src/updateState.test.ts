@@ -81,7 +81,7 @@ describe("getAutoUpdateDisabledReason", () => {
         appImage: undefined,
         disabledByEnv: true,
       }),
-    ).toContain("T3CODE_DISABLE_AUTO_UPDATE");
+    ).toContain("OSSCODE_DISABLE_AUTO_UPDATE");
   });
 
   it("reports linux non-AppImage builds as disabled", () => {

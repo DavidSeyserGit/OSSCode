@@ -25,7 +25,7 @@ async function waitFor(predicate: () => boolean | Promise<boolean>, timeoutMs = 
   }
 }
 
-const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "t3code-claude-adapter-"));
+const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "osscode-claude-adapter-"));
 const stateDir = path.join(tempRoot, "state");
 const workspaceDir = path.join(tempRoot, "workspace");
 const capturedArgsPath = path.join(tempRoot, "captured-args.json");

@@ -17,6 +17,7 @@ import { ProviderCommandReactorLive } from "./orchestration/Layers/ProviderComma
 import { OrchestrationProjectionPipelineLive } from "./orchestration/Layers/ProjectionPipeline";
 import { OrchestrationProjectionSnapshotQueryLive } from "./orchestration/Layers/ProjectionSnapshotQuery";
 import { ProviderRuntimeIngestionLive } from "./orchestration/Layers/ProviderRuntimeIngestion";
+import { QueuedTurnReactorLive } from "./orchestration/Layers/QueuedTurnReactor";
 import { ProviderUnsupportedError } from "./provider/Errors";
 import { makeClaudeCodeAdapterLive } from "./provider/Layers/ClaudeCodeAdapter";
 import { makeCodexAdapterLive } from "./provider/Layers/CodexAdapter";
@@ -110,10 +111,14 @@ export function makeServerRuntimeServicesLayer() {
   const checkpointReactorLayer = CheckpointReactorLive.pipe(
     Layer.provideMerge(runtimeServicesLayer),
   );
+  const queuedTurnReactorLayer = QueuedTurnReactorLive.pipe(
+    Layer.provideMerge(runtimeServicesLayer),
+  );
   const orchestrationReactorLayer = OrchestrationReactorLive.pipe(
     Layer.provideMerge(runtimeIngestionLayer),
     Layer.provideMerge(providerCommandReactorLayer),
     Layer.provideMerge(checkpointReactorLayer),
+    Layer.provideMerge(queuedTurnReactorLayer),
   );
 
   const terminalLayer = TerminalManagerLive.pipe(

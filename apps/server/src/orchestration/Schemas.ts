@@ -8,9 +8,12 @@ import {
   ThreadInteractionModeSetPayload as ContractsThreadInteractionModeSetPayloadSchema,
   ThreadDeletedPayload as ContractsThreadDeletedPayloadSchema,
   ThreadMessageSentPayload as ContractsThreadMessageSentPayloadSchema,
+  ThreadTurnEnqueuedPayload as ContractsThreadTurnEnqueuedPayloadSchema,
+  ThreadTurnQueueItemRemovedPayload as ContractsThreadTurnQueueItemRemovedPayloadSchema,
   ThreadProposedPlanUpsertedPayload as ContractsThreadProposedPlanUpsertedPayloadSchema,
   ThreadSessionSetPayload as ContractsThreadSessionSetPayloadSchema,
   ThreadTurnDiffCompletedPayload as ContractsThreadTurnDiffCompletedPayloadSchema,
+  OrchestrationThreadTokenUsageUpdatedPayload as ContractsThreadTokenUsageUpdatedPayloadSchema,
   ThreadRevertedPayload as ContractsThreadRevertedPayloadSchema,
   ThreadActivityAppendedPayload as ContractsThreadActivityAppendedPayloadSchema,
   ThreadTurnStartRequestedPayload as ContractsThreadTurnStartRequestedPayloadSchema,
@@ -32,9 +35,12 @@ export const ThreadInteractionModeSetPayload = ContractsThreadInteractionModeSet
 export const ThreadDeletedPayload = ContractsThreadDeletedPayloadSchema;
 
 export const MessageSentPayloadSchema = ContractsThreadMessageSentPayloadSchema;
+export const ThreadTurnEnqueuedPayload = ContractsThreadTurnEnqueuedPayloadSchema;
+export const ThreadTurnQueueItemRemovedPayload = ContractsThreadTurnQueueItemRemovedPayloadSchema;
 export const ThreadProposedPlanUpsertedPayload = ContractsThreadProposedPlanUpsertedPayloadSchema;
 export const ThreadSessionSetPayload = ContractsThreadSessionSetPayloadSchema;
 export const ThreadTurnDiffCompletedPayload = ContractsThreadTurnDiffCompletedPayloadSchema;
+export const ThreadTokenUsageUpdatedPayload = ContractsThreadTokenUsageUpdatedPayloadSchema;
 export const ThreadRevertedPayload = ContractsThreadRevertedPayloadSchema;
 export const ThreadActivityAppendedPayload = ContractsThreadActivityAppendedPayloadSchema;
 
