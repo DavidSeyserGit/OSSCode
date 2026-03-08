@@ -17,7 +17,7 @@ const root = resolve(__dirname, "..");
 const args = process.argv.slice(2);
 const bump = args[0];
 const preidIndex = args.indexOf("--preid");
-const preid = preidIndex !== -1 ? args[preidIndex + 1] : "beta";
+const preid = (preidIndex !== -1 ? args[preidIndex + 1] : undefined) ?? "beta";
 
 if (!bump) {
   console.error(
@@ -30,9 +30,9 @@ function parseVersion(v: string) {
   const match = v.match(/^(\d+)\.(\d+)\.(\d+)(?:-([a-z]+)\.(\d+))?$/);
   if (!match) throw new Error(`Cannot parse version: ${v}`);
   return {
-    major: parseInt(match[1]),
-    minor: parseInt(match[2]),
-    patch: parseInt(match[3]),
+    major: parseInt(match[1] as string),
+    minor: parseInt(match[2] as string),
+    patch: parseInt(match[3] as string),
     preid: match[4] ?? null,
     pre: match[5] !== undefined ? parseInt(match[5]) : null,
   };
@@ -84,7 +84,7 @@ if (!currentVersion) {
   process.exit(1);
 }
 
-const newVersion = nextVersion(currentVersion, bump, preid);
+const newVersion = nextVersion(currentVersion as string, bump, preid);
 console.log(`${currentVersion} → ${newVersion}`);
 
 let updated = 0;
