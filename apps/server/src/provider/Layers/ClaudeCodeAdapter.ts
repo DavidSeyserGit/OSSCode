@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { type ChildProcessWithoutNullStreams, spawn } from "node:child_process";
+import path from "node:path";
 
 import {
   type CanonicalItemType,
@@ -13,6 +14,8 @@ import {
 } from "@t3tools/contracts";
 import { Effect, Layer, PubSub, Stream } from "effect";
 
+import { resolveAttachmentPath } from "../../attachmentStore.ts";
+import { ServerConfig } from "../../config.ts";
 import {
   ProviderAdapterRequestError,
   ProviderAdapterSessionNotFoundError,
@@ -186,7 +189,7 @@ function makeUnsupportedOperationError(method: string): ProviderAdapterRequestEr
   return new ProviderAdapterRequestError({
     provider: PROVIDER,
     method,
-    detail: "Claude Code does not support this operation in T3 Code yet.",
+    detail: "Claude Code does not support this operation in OSS Code yet.",
   });
 }
 
@@ -201,6 +204,7 @@ function buildClaudeArgs(input: {
   readonly prompt: string;
   readonly sessionId: string;
   readonly model?: string;
+  readonly addDirectories?: ReadonlyArray<string>;
   readonly runtimeMode: ProviderSession["runtimeMode"];
   readonly interactionMode?: "default" | "plan";
   readonly conversationStarted: boolean;
@@ -225,11 +229,44 @@ function buildClaudeArgs(input: {
     args.push("--model", input.model);
   }
 
+  const addDirectories = input.addDirectories ?? [];
+  if (addDirectories.length > 0) {
+    args.push("--add-dir", ...addDirectories);
+  }
+
   if (input.interactionMode === "plan") {
     args.push("--agent", "Plan");
   }
 
   return args;
+}
+
+function formatAttachmentPrompt(input: {
+  readonly prompt: string;
+  readonly attachments: ReadonlyArray<{
+    readonly path: string;
+    readonly name: string;
+    readonly mimeType: string;
+    readonly sizeBytes: number;
+  }>;
+}): string {
+  if (input.attachments.length === 0) {
+    return input.prompt;
+  }
+
+  const attachmentLines = input.attachments.map(
+    (attachment, index) =>
+      `${index + 1}. ${attachment.path} (${attachment.name}, ${attachment.mimeType}, ${attachment.sizeBytes} bytes)`,
+  );
+
+  return [
+    "Image attachments are available as local files.",
+    "Open and inspect these image paths directly before answering:",
+    ...attachmentLines,
+    "",
+    "User request:",
+    input.prompt,
+  ].join("\n");
 }
 
 function killChild(child: ChildProcessWithoutNullStreams): void {
@@ -263,6 +300,7 @@ export function makeClaudeCodeAdapterLive(options?: ClaudeCodeAdapterLiveOptions
   return Layer.effect(
     ClaudeCodeAdapter,
     Effect.gen(function* () {
+      const serverConfig = yield* ServerConfig;
       const runtimeEventPubSub = yield* PubSub.unbounded<ProviderRuntimeEvent>();
       const sessions = new Map<ThreadId, ClaudeSessionState>();
       const binaryPath = options?.binaryPath ?? DEFAULT_BINARY_PATH;
@@ -328,13 +366,6 @@ export function makeClaudeCodeAdapterLive(options?: ClaudeCodeAdapterLiveOptions
               detail: "Claude Code already has an active turn for this thread.",
             });
           }
-          if ((input.attachments?.length ?? 0) > 0) {
-            return yield* new ProviderAdapterRequestError({
-              provider: PROVIDER,
-              method: "sendTurn",
-              detail: "Claude Code image attachments are not supported in T3 Code yet.",
-            });
-          }
 
           const prompt = input.input?.trim();
           if (!prompt) {
@@ -345,15 +376,59 @@ export function makeClaudeCodeAdapterLive(options?: ClaudeCodeAdapterLiveOptions
             });
           }
 
+          const resolvedAttachments = (input.attachments ?? []).map((attachment) => {
+            const attachmentPath = resolveAttachmentPath({
+              stateDir: serverConfig.stateDir,
+              attachment,
+            });
+            if (!attachmentPath) {
+              return null;
+            }
+            return {
+              path: attachmentPath,
+              name: attachment.name,
+              mimeType: attachment.mimeType,
+              sizeBytes: attachment.sizeBytes,
+            };
+          });
+
+          const missingAttachment = resolvedAttachments.find((attachment) => attachment === null);
+          if (missingAttachment) {
+            return yield* new ProviderAdapterRequestError({
+              provider: PROVIDER,
+              method: "sendTurn",
+              detail: "One or more Claude Code image attachments could not be resolved on disk.",
+            });
+          }
+
+          const attachmentInputs = resolvedAttachments.filter(
+            (
+              attachment,
+            ): attachment is {
+              readonly path: string;
+              readonly name: string;
+              readonly mimeType: string;
+              readonly sizeBytes: number;
+            } => attachment !== null,
+          );
+          const promptWithAttachments = formatAttachmentPrompt({
+            prompt,
+            attachments: attachmentInputs,
+          });
+          const addDirectories = [
+            ...new Set(attachmentInputs.map((attachment) => path.dirname(attachment.path))),
+          ];
+
           const turnId = makeTurnId(input.threadId);
           const assistantItemId = makeAssistantItemId(turnId);
           const requestedModel = input.model ?? state.session.model;
           const child = spawn(
             binaryPath,
             buildClaudeArgs({
-              prompt,
+              prompt: promptWithAttachments,
               sessionId: state.providerSessionId,
               ...(requestedModel ? { model: requestedModel } : {}),
+              ...(addDirectories.length > 0 ? { addDirectories } : {}),
               runtimeMode: state.session.runtimeMode,
               ...(input.interactionMode ? { interactionMode: input.interactionMode } : {}),
               conversationStarted: state.conversationStarted,
