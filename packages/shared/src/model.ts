@@ -15,6 +15,7 @@ type CatalogProvider = keyof typeof MODEL_OPTIONS_BY_PROVIDER;
 const MODEL_SLUG_SET_BY_PROVIDER: Record<CatalogProvider, ReadonlySet<ModelSlug>> = {
   codex: new Set(MODEL_OPTIONS_BY_PROVIDER.codex.map((option) => option.slug)),
   claudeCode: new Set(MODEL_OPTIONS_BY_PROVIDER.claudeCode.map((option) => option.slug)),
+  cursor: new Set(MODEL_OPTIONS_BY_PROVIDER.cursor.map((option) => option.slug)),
 };
 
 export function getModelOptions(provider: ProviderKind = "codex") {
@@ -38,9 +39,14 @@ export function normalizeModelSlug(
     return null;
   }
 
+  const normalizedInput =
+    provider === "cursor"
+      ? (trimmed.match(/^(.*?)\s+-\s+.+$/)?.[1]?.trim() || trimmed)
+      : trimmed;
+
   const aliases = MODEL_SLUG_ALIASES_BY_PROVIDER[provider] as Record<string, ModelSlug>;
-  const aliased = aliases[trimmed];
-  return typeof aliased === "string" ? aliased : (trimmed as ModelSlug);
+  const aliased = aliases[normalizedInput];
+  return typeof aliased === "string" ? aliased : (normalizedInput as ModelSlug);
 }
 
 export function resolveModelSlug(
@@ -50,6 +56,10 @@ export function resolveModelSlug(
   const normalized = normalizeModelSlug(model, provider);
   if (!normalized) {
     return getDefaultModel(provider);
+  }
+
+  if (provider === "cursor") {
+    return normalized;
   }
 
   return MODEL_SLUG_SET_BY_PROVIDER[provider].has(normalized)
@@ -99,6 +109,9 @@ export function supportsReasoningEffortForModel(
 ): boolean {
   if (provider === "codex") {
     return CODEX_REASONING_EFFORT_OPTIONS.length > 0;
+  }
+  if (provider === "cursor") {
+    return false;
   }
 
   const normalized = normalizeModelSlug(model, "claudeCode");

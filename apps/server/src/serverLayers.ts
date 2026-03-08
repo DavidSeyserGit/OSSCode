@@ -20,6 +20,8 @@ import { ProviderRuntimeIngestionLive } from "./orchestration/Layers/ProviderRun
 import { ProviderUnsupportedError } from "./provider/Errors";
 import { makeClaudeCodeAdapterLive } from "./provider/Layers/ClaudeCodeAdapter";
 import { makeCodexAdapterLive } from "./provider/Layers/CodexAdapter";
+import { makeCursorAdapterLive } from "./provider/Layers/CursorAdapter";
+import { ProviderModelsLive } from "./provider/Layers/ProviderModels";
 import { ProviderAdapterRegistryLive } from "./provider/Layers/ProviderAdapterRegistry";
 import { makeProviderServiceLive } from "./provider/Layers/ProviderService";
 import { ProviderSessionDirectoryLive } from "./provider/Layers/ProviderSessionDirectory";
@@ -61,9 +63,13 @@ export function makeServerProviderLayer(): Layer.Layer<
     const claudeCodeAdapterLayer = makeClaudeCodeAdapterLive(
       nativeEventLogger ? { nativeEventLogger } : undefined,
     );
+    const cursorAdapterLayer = makeCursorAdapterLive(
+      nativeEventLogger ? { nativeEventLogger } : undefined,
+    );
     const adapterRegistryLayer = ProviderAdapterRegistryLive.pipe(
       Layer.provideMerge(codexAdapterLayer),
       Layer.provideMerge(claudeCodeAdapterLayer),
+      Layer.provideMerge(cursorAdapterLayer),
       Layer.provideMerge(providerSessionDirectoryLayer),
     );
     return makeProviderServiceLive(
@@ -129,6 +135,7 @@ export function makeServerRuntimeServicesLayer() {
     gitCoreLayer,
     gitManagerLayer,
     terminalLayer,
+    ProviderModelsLive,
     KeybindingsLive,
   ).pipe(Layer.provideMerge(NodeServices.layer));
 }

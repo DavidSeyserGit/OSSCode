@@ -1,6 +1,6 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useQuery } from "@tanstack/react-query";
-import { useCallback, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import { type ProviderKind } from "@t3tools/contracts";
 import { getModelOptions, normalizeModelSlug } from "@t3tools/shared/model";
 import { ZapIcon } from "lucide-react";
@@ -14,6 +14,7 @@ import {
 import { isElectron } from "../env";
 import { useTheme } from "../hooks/useTheme";
 import { serverConfigQueryOptions } from "../lib/serverReactQuery";
+import { providerModelsQueryOptions } from "../lib/providerReactQuery";
 import { ensureNativeApi } from "../nativeApi";
 import { preferredTerminalEditor } from "../terminal-links";
 import { Button } from "../components/ui/button";
@@ -61,6 +62,13 @@ const MODEL_PROVIDER_SETTINGS: Array<{
     placeholder: "your-claude-model-slug",
     example: "claude-sonnet-4-7",
   },
+  {
+    provider: "cursor",
+    title: "Cursor",
+    description: "Save additional Cursor model slugs for the picker and `/model` command.",
+    placeholder: "your-cursor-model-slug",
+    example: "gpt-5",
+  },
 ] as const;
 
 function getCustomModelsForProvider(
@@ -72,6 +80,8 @@ function getCustomModelsForProvider(
       return settings.customCodexModels;
     case "claudeCode":
       return settings.customClaudeCodeModels;
+    case "cursor":
+      return settings.customCursorModels;
   }
 }
 
@@ -84,6 +94,8 @@ function getDefaultCustomModelsForProvider(
       return defaults.customCodexModels;
     case "claudeCode":
       return defaults.customClaudeCodeModels;
+    case "cursor":
+      return defaults.customCursorModels;
   }
 }
 
@@ -93,6 +105,8 @@ function patchCustomModels(provider: ProviderKind, models: string[]) {
       return { customCodexModels: models };
     case "claudeCode":
       return { customClaudeCodeModels: models };
+    case "cursor":
+      return { customCursorModels: models };
   }
 }
 
@@ -100,6 +114,7 @@ function SettingsRouteView() {
   const { theme, setTheme, resolvedTheme } = useTheme();
   const { settings, defaults, updateSettings } = useAppSettings();
   const serverConfigQuery = useQuery(serverConfigQueryOptions());
+  const cursorModelsQuery = useQuery(providerModelsQueryOptions("cursor"));
   const [isOpeningKeybindings, setIsOpeningKeybindings] = useState(false);
   const [openKeybindingsError, setOpenKeybindingsError] = useState<string | null>(null);
   const [customModelInputByProvider, setCustomModelInputByProvider] = useState<
@@ -107,6 +122,7 @@ function SettingsRouteView() {
   >({
     codex: "",
     claudeCode: "",
+    cursor: "",
   });
   const [customModelErrorByProvider, setCustomModelErrorByProvider] = useState<
     Partial<Record<ProviderKind, string | null>>
@@ -116,6 +132,14 @@ function SettingsRouteView() {
   const codexHomePath = settings.codexHomePath;
   const codexServiceTier = settings.codexServiceTier;
   const keybindingsConfigPath = serverConfigQuery.data?.keybindingsConfigPath ?? null;
+  const builtInModelOptionsByProvider = useMemo(
+    () => ({
+      codex: getModelOptions("codex"),
+      claudeCode: getModelOptions("claudeCode"),
+      cursor: cursorModelsQuery.data ?? [{ slug: "auto", name: "Auto" }],
+    }),
+    [cursorModelsQuery.data],
+  );
 
   const openKeybindingsFile = useCallback(() => {
     if (!keybindingsConfigPath) return;
@@ -145,7 +169,7 @@ function SettingsRouteView() {
       }));
       return;
     }
-    if (getModelOptions(provider).some((option) => option.slug === normalized)) {
+    if (builtInModelOptionsByProvider[provider].some((option) => option.slug === normalized)) {
       setCustomModelErrorByProvider((existing) => ({
         ...existing,
         [provider]: "That model is already built in.",
@@ -176,7 +200,7 @@ function SettingsRouteView() {
       ...existing,
       [provider]: null,
     }));
-  }, [customModelInputByProvider, settings, updateSettings]);
+  }, [builtInModelOptionsByProvider, customModelInputByProvider, settings, updateSettings]);
 
   const removeCustomModel = useCallback(
     (provider: ProviderKind, slug: string) => {

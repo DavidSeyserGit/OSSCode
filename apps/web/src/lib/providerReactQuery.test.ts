@@ -1,19 +1,27 @@
 import { ThreadId, type NativeApi } from "@t3tools/contracts";
 import { QueryClient } from "@tanstack/react-query";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { checkpointDiffQueryOptions, providerQueryKeys } from "./providerReactQuery";
+import {
+  checkpointDiffQueryOptions,
+  providerModelsQueryOptions,
+  providerQueryKeys,
+} from "./providerReactQuery";
 import * as nativeApi from "../nativeApi";
 
 const threadId = ThreadId.makeUnsafe("thread-id");
 
 function mockNativeApi(input: {
-  getTurnDiff: ReturnType<typeof vi.fn>;
-  getFullThreadDiff: ReturnType<typeof vi.fn>;
+  getTurnDiff?: ReturnType<typeof vi.fn>;
+  getFullThreadDiff?: ReturnType<typeof vi.fn>;
+  getModels?: ReturnType<typeof vi.fn>;
 }) {
   vi.spyOn(nativeApi, "ensureNativeApi").mockReturnValue({
+    providers: {
+      getModels: input.getModels ?? vi.fn(),
+    },
     orchestration: {
-      getTurnDiff: input.getTurnDiff,
-      getFullThreadDiff: input.getFullThreadDiff,
+      getTurnDiff: input.getTurnDiff ?? vi.fn(),
+      getFullThreadDiff: input.getFullThreadDiff ?? vi.fn(),
     },
   } as unknown as NativeApi);
 }
@@ -157,5 +165,24 @@ describe("checkpointDiffQueryOptions", () => {
     expect(typeof checkpointDelay).toBe("number");
     expect(typeof genericDelay).toBe("number");
     expect((checkpointDelay ?? 0) > (genericDelay ?? 0)).toBe(true);
+  });
+});
+
+describe("providerModelsQueryOptions", () => {
+  it("loads provider models through the provider RPC", async () => {
+    const getModels = vi.fn().mockResolvedValue([
+      { slug: "auto", name: "Auto" },
+      { slug: "gpt-5", name: "gpt-5" },
+    ]);
+    mockNativeApi({ getModels });
+
+    const queryClient = new QueryClient();
+    const result = await queryClient.fetchQuery(providerModelsQueryOptions("cursor"));
+
+    expect(getModels).toHaveBeenCalledWith({ provider: "cursor" });
+    expect(result).toEqual([
+      { slug: "auto", name: "Auto" },
+      { slug: "gpt-5", name: "gpt-5" },
+    ]);
   });
 });

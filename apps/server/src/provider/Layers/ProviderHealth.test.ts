@@ -4,7 +4,11 @@ import { Effect, Layer, Sink, Stream } from "effect";
 import * as PlatformError from "effect/PlatformError";
 import { ChildProcessSpawner } from "effect/unstable/process";
 
-import { checkCodexProviderStatus, parseAuthStatusFromOutput } from "./ProviderHealth";
+import {
+  checkCodexProviderStatus,
+  checkCursorProviderStatus,
+  parseAuthStatusFromOutput,
+} from "./ProviderHealth";
 
 // ── Test helpers ────────────────────────────────────────────────────
 
@@ -83,6 +87,60 @@ it.effect("returns unavailable when codex is missing", () =>
     assert.strictEqual(status.authStatus, "unknown");
     assert.strictEqual(status.message, "Codex CLI (`codex`) is not installed or not on PATH.");
   }).pipe(Effect.provide(failingSpawnerLayer("spawn codex ENOENT"))),
+);
+
+it.effect("returns ready when cursor-agent is installed and authenticated", () =>
+  Effect.gen(function* () {
+    const status = yield* checkCursorProviderStatus;
+    assert.strictEqual(status.provider, "cursor");
+    assert.strictEqual(status.status, "ready");
+    assert.strictEqual(status.available, true);
+    assert.strictEqual(status.authStatus, "authenticated");
+  }).pipe(
+    Effect.provide(
+      mockSpawnerLayer((args) => {
+        const joined = args.join(" ");
+        if (joined === "--version") return { stdout: "cursor-agent 1.0.0\n", stderr: "", code: 0 };
+        if (joined === "about") {
+          return {
+            stdout: "About Cursor CLI\n\nUser Email          user@example.com\n",
+            stderr: "",
+            code: 0,
+          };
+        }
+        throw new Error(`Unexpected args: ${joined}`);
+      }),
+    ),
+  ),
+);
+
+it.effect("returns unauthenticated when cursor-agent about reports not logged in", () =>
+  Effect.gen(function* () {
+    const status = yield* checkCursorProviderStatus;
+    assert.strictEqual(status.provider, "cursor");
+    assert.strictEqual(status.status, "error");
+    assert.strictEqual(status.available, true);
+    assert.strictEqual(status.authStatus, "unauthenticated");
+    assert.strictEqual(
+      status.message,
+      "Cursor Agent CLI is not authenticated. Run `cursor-agent login` and try again.",
+    );
+  }).pipe(
+    Effect.provide(
+      mockSpawnerLayer((args) => {
+        const joined = args.join(" ");
+        if (joined === "--version") return { stdout: "cursor-agent 1.0.0\n", stderr: "", code: 0 };
+        if (joined === "about") {
+          return {
+            stdout: "About Cursor CLI\n\nUser Email          Not logged in\n",
+            stderr: "",
+            code: 0,
+          };
+        }
+        throw new Error(`Unexpected args: ${joined}`);
+      }),
+    ),
+  ),
 );
 
 it.effect("returns unavailable when codex is below the minimum supported version", () =>

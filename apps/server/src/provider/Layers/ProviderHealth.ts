@@ -26,6 +26,7 @@ import { ProviderHealth, type ProviderHealthShape } from "../Services/ProviderHe
 const DEFAULT_TIMEOUT_MS = 4_000;
 const CODEX_PROVIDER = "codex" as const;
 const CLAUDE_CODE_PROVIDER = "claudeCode" as const;
+const CURSOR_PROVIDER = "cursor" as const;
 
 // ── Pure helpers ────────────────────────────────────────────────────
 
@@ -58,6 +59,17 @@ function isClaudeCommandMissingCause(error: unknown): boolean {
   return (
     lower.includes("command not found: claude") ||
     lower.includes("spawn claude enoent") ||
+    lower.includes("enoent") ||
+    lower.includes("notfound")
+  );
+}
+
+function isCursorCommandMissingCause(error: unknown): boolean {
+  if (!(error instanceof Error)) return false;
+  const lower = error.message.toLowerCase();
+  return (
+    lower.includes("command not found: cursor-agent") ||
+    lower.includes("spawn cursor-agent enoent") ||
     lower.includes("enoent") ||
     lower.includes("notfound")
   );
@@ -213,6 +225,27 @@ const runClaudeCommand = (args: ReadonlyArray<string>) =>
   Effect.gen(function* () {
     const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
     const command = ChildProcess.make("claude", [...args], {
+      shell: process.platform === "win32",
+    });
+
+    const child = yield* spawner.spawn(command);
+
+    const [stdout, stderr, exitCode] = yield* Effect.all(
+      [
+        collectStreamAsString(child.stdout),
+        collectStreamAsString(child.stderr),
+        child.exitCode.pipe(Effect.map(Number)),
+      ],
+      { concurrency: "unbounded" },
+    );
+
+    return { stdout, stderr, code: exitCode } satisfies CommandResult;
+  }).pipe(Effect.scoped);
+
+const runCursorCommand = (args: ReadonlyArray<string>) =>
+  Effect.gen(function* () {
+    const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
+    const command = ChildProcess.make("cursor-agent", [...args], {
       shell: process.platform === "win32",
     });
 
@@ -387,6 +420,57 @@ function parseClaudeAuthStatusFromOutput(result: CommandResult): {
   };
 }
 
+function parseCursorAuthStatusFromOutput(result: CommandResult): {
+  readonly status: ServerProviderStatusState;
+  readonly authStatus: ServerProviderAuthStatus;
+  readonly message?: string;
+} {
+  const combined = `${result.stdout}\n${result.stderr}`.toLowerCase();
+
+  if (
+    combined.includes("not logged in") ||
+    combined.includes("login required") ||
+    combined.includes("starting login process")
+  ) {
+    return {
+      status: "error",
+      authStatus: "unauthenticated",
+      message: "Cursor Agent CLI is not authenticated. Run `cursor-agent login` and try again.",
+    };
+  }
+
+  if (combined.includes("user email")) {
+    return {
+      status: combined.includes("user email          not logged in") ? "error" : "ready",
+      authStatus: combined.includes("user email          not logged in")
+        ? "unauthenticated"
+        : "authenticated",
+      ...(combined.includes("user email          not logged in")
+        ? {
+            message:
+              "Cursor Agent CLI is not authenticated. Run `cursor-agent login` and try again.",
+          }
+        : {}),
+    };
+  }
+
+  if (result.code === 0) {
+    return {
+      status: "ready",
+      authStatus: "authenticated",
+    };
+  }
+
+  const detail = detailFromResult(result);
+  return {
+    status: "warning",
+    authStatus: "unknown",
+    message: detail
+      ? `Could not verify Cursor authentication status. ${detail}`
+      : "Could not verify Cursor authentication status.",
+  };
+}
+
 export const checkClaudeCodeProviderStatus: Effect.Effect<
   ServerProviderStatus,
   never,
@@ -482,6 +566,100 @@ export const checkClaudeCodeProviderStatus: Effect.Effect<
   } satisfies ServerProviderStatus;
 });
 
+export const checkCursorProviderStatus: Effect.Effect<
+  ServerProviderStatus,
+  never,
+  ChildProcessSpawner.ChildProcessSpawner
+> = Effect.gen(function* () {
+  const checkedAt = new Date().toISOString();
+
+  const versionProbe = yield* runCursorCommand(["--version"]).pipe(
+    Effect.timeoutOption(DEFAULT_TIMEOUT_MS),
+    Effect.result,
+  );
+
+  if (Result.isFailure(versionProbe)) {
+    const error = versionProbe.failure;
+    return {
+      provider: CURSOR_PROVIDER,
+      status: "error" as const,
+      available: false,
+      authStatus: "unknown" as const,
+      checkedAt,
+      message: isCursorCommandMissingCause(error)
+        ? "Cursor Agent CLI (`cursor-agent`) is not installed or not on PATH."
+        : `Failed to execute Cursor Agent health check: ${error instanceof Error ? error.message : String(error)}.`,
+    };
+  }
+
+  if (Option.isNone(versionProbe.success)) {
+    return {
+      provider: CURSOR_PROVIDER,
+      status: "error" as const,
+      available: false,
+      authStatus: "unknown" as const,
+      checkedAt,
+      message: "Cursor Agent CLI is installed but failed to run. Timed out while running command.",
+    };
+  }
+
+  const version = versionProbe.success.value;
+  if (version.code !== 0) {
+    const detail = detailFromResult(version);
+    return {
+      provider: CURSOR_PROVIDER,
+      status: "error" as const,
+      available: false,
+      authStatus: "unknown" as const,
+      checkedAt,
+      message: detail
+        ? `Cursor Agent CLI is installed but failed to run. ${detail}`
+        : "Cursor Agent CLI is installed but failed to run.",
+    };
+  }
+
+  const authProbe = yield* runCursorCommand(["about"]).pipe(
+    Effect.timeoutOption(DEFAULT_TIMEOUT_MS),
+    Effect.result,
+  );
+
+  if (Result.isFailure(authProbe)) {
+    const error = authProbe.failure;
+    return {
+      provider: CURSOR_PROVIDER,
+      status: "warning" as const,
+      available: true,
+      authStatus: "unknown" as const,
+      checkedAt,
+      message:
+        error instanceof Error
+          ? `Could not verify Cursor authentication status: ${error.message}.`
+          : "Could not verify Cursor authentication status.",
+    };
+  }
+
+  if (Option.isNone(authProbe.success)) {
+    return {
+      provider: CURSOR_PROVIDER,
+      status: "warning" as const,
+      available: true,
+      authStatus: "unknown" as const,
+      checkedAt,
+      message: "Could not verify Cursor authentication status. Timed out while running command.",
+    };
+  }
+
+  const parsed = parseCursorAuthStatusFromOutput(authProbe.success.value);
+  return {
+    provider: CURSOR_PROVIDER,
+    status: parsed.status,
+    available: true,
+    authStatus: parsed.authStatus,
+    checkedAt,
+    ...(parsed.message ? { message: parsed.message } : {}),
+  } satisfies ServerProviderStatus;
+});
+
 // ── Layer ───────────────────────────────────────────────────────────
 
 export const ProviderHealthLive = Layer.effect(
@@ -489,8 +667,9 @@ export const ProviderHealthLive = Layer.effect(
   Effect.gen(function* () {
     const codexStatus = yield* checkCodexProviderStatus;
     const claudeCodeStatus = yield* checkClaudeCodeProviderStatus;
+    const cursorStatus = yield* checkCursorProviderStatus;
     return {
-      getStatuses: Effect.succeed([codexStatus, claudeCodeStatus]),
+      getStatuses: Effect.succeed([codexStatus, claudeCodeStatus, cursorStatus]),
     } satisfies ProviderHealthShape;
   }),
 );
