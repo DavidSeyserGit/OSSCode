@@ -10,6 +10,12 @@ const UPDATE_STATE_CHANNEL = "desktop:update-state";
 const UPDATE_GET_STATE_CHANNEL = "desktop:update-get-state";
 const UPDATE_DOWNLOAD_CHANNEL = "desktop:update-download";
 const UPDATE_INSTALL_CHANNEL = "desktop:update-install";
+const ENVIRONMENT_REPORT_CHANNEL = "desktop:environment-report";
+const BACKEND_RUNTIME_STATE_CHANNEL = "desktop:backend-runtime-state";
+const BACKEND_RUNTIME_GET_STATE_CHANNEL = "desktop:backend-runtime-get-state";
+const BACKEND_RESTART_CHANNEL = "desktop:backend-restart";
+const OPEN_LOG_DIRECTORY_CHANNEL = "desktop:open-log-directory";
+const SHOW_NOTIFICATION_CHANNEL = "desktop:show-notification";
 const wsUrl = process.env.T3CODE_DESKTOP_WS_URL ?? null;
 
 contextBridge.exposeInMainWorld("desktopBridge", {
@@ -41,6 +47,22 @@ contextBridge.exposeInMainWorld("desktopBridge", {
     ipcRenderer.on(UPDATE_STATE_CHANNEL, wrappedListener);
     return () => {
       ipcRenderer.removeListener(UPDATE_STATE_CHANNEL, wrappedListener);
+    };
+  },
+  getEnvironmentReport: (input) => ipcRenderer.invoke(ENVIRONMENT_REPORT_CHANNEL, input),
+  getBackendRuntimeState: () => ipcRenderer.invoke(BACKEND_RUNTIME_GET_STATE_CHANNEL),
+  restartBackend: () => ipcRenderer.invoke(BACKEND_RESTART_CHANNEL),
+  openLogDirectory: () => ipcRenderer.invoke(OPEN_LOG_DIRECTORY_CHANNEL),
+  showNotification: (input) => ipcRenderer.invoke(SHOW_NOTIFICATION_CHANNEL, input),
+  onBackendRuntimeState: (listener) => {
+    const wrappedListener = (_event: Electron.IpcRendererEvent, state: unknown) => {
+      if (typeof state !== "object" || state === null) return;
+      listener(state as Parameters<typeof listener>[0]);
+    };
+
+    ipcRenderer.on(BACKEND_RUNTIME_STATE_CHANNEL, wrappedListener);
+    return () => {
+      ipcRenderer.removeListener(BACKEND_RUNTIME_STATE_CHANNEL, wrappedListener);
     };
   },
 } satisfies DesktopBridge);

@@ -1,7 +1,11 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useQuery } from "@tanstack/react-query";
-import { useCallback, useMemo, useState } from "react";
-import { type ProviderKind } from "@t3tools/contracts";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import {
+  type DesktopBackendRuntimeState,
+  type DesktopEnvironmentReport,
+  type ProviderKind,
+} from "@t3tools/contracts";
 import { getModelOptions, normalizeModelSlug } from "@t3tools/shared/model";
 import { ZapIcon } from "lucide-react";
 
@@ -19,6 +23,8 @@ import { ensureNativeApi } from "../nativeApi";
 import { preferredTerminalEditor } from "../terminal-links";
 import { Button } from "../components/ui/button";
 import { Input } from "../components/ui/input";
+import { readDesktopBridge } from "../desktopBridge";
+import { toastManager } from "../components/ui/toast";
 import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "../components/ui/select";
 import { Switch } from "../components/ui/switch";
 import { SidebarInset } from "~/components/ui/sidebar";
@@ -132,6 +138,9 @@ function SettingsRouteView() {
   const cursorModelsQuery = useQuery(providerModelsQueryOptions("cursor"));
   const [isOpeningKeybindings, setIsOpeningKeybindings] = useState(false);
   const [openKeybindingsError, setOpenKeybindingsError] = useState<string | null>(null);
+  const [desktopRuntimeState, setDesktopRuntimeState] = useState<DesktopBackendRuntimeState | null>(
+    null,
+  );
   const [customModelInputByProvider, setCustomModelInputByProvider] = useState<
     Record<ProviderKind, string>
   >({
@@ -147,6 +156,20 @@ function SettingsRouteView() {
   const codexHomePath = settings.codexHomePath;
   const codexServiceTier = settings.codexServiceTier;
   const keybindingsConfigPath = serverConfigQuery.data?.keybindingsConfigPath ?? null;
+  const desktopEnvironmentQuery = useQuery<DesktopEnvironmentReport>({
+    queryKey: ["desktop", "environment-report", codexBinaryPath],
+    enabled: isElectron,
+    staleTime: 60_000,
+    queryFn: async () => {
+      const bridge = readDesktopBridge();
+      if (!bridge) {
+        throw new Error("Desktop bridge unavailable.");
+      }
+      return bridge.getEnvironmentReport({
+        codexBinaryPath,
+      });
+    },
+  });
   const builtInModelOptionsByProvider = useMemo(
     () => ({
       codex: getModelOptions("codex"),
@@ -172,6 +195,74 @@ function SettingsRouteView() {
         setIsOpeningKeybindings(false);
       });
   }, [keybindingsConfigPath]);
+
+  useEffect(() => {
+    if (!isElectron) return;
+    const bridge = readDesktopBridge();
+    if (
+      !bridge ||
+      typeof bridge.getBackendRuntimeState !== "function" ||
+      typeof bridge.onBackendRuntimeState !== "function"
+    ) {
+      return;
+    }
+
+    let disposed = false;
+    let receivedSubscriptionUpdate = false;
+    const unsubscribe = bridge.onBackendRuntimeState((nextState) => {
+      if (disposed) return;
+      receivedSubscriptionUpdate = true;
+      setDesktopRuntimeState(nextState);
+    });
+
+    void bridge
+      .getBackendRuntimeState()
+      .then((nextState) => {
+        if (disposed || receivedSubscriptionUpdate) return;
+        setDesktopRuntimeState(nextState);
+      })
+      .catch(() => undefined);
+
+    return () => {
+      disposed = true;
+      unsubscribe();
+    };
+  }, []);
+
+  const openDesktopLogs = useCallback(() => {
+    const bridge = readDesktopBridge();
+    if (!bridge) return;
+
+    void bridge.openLogDirectory().then((opened) => {
+      if (opened) return;
+      toastManager.add({
+        type: "error",
+        title: "Unable to open logs",
+        description: "The desktop log directory could not be opened.",
+      });
+    });
+  }, []);
+
+  const restartDesktopBackend = useCallback(() => {
+    const bridge = readDesktopBridge();
+    if (!bridge) return;
+
+    void bridge.restartBackend().then((restarted) => {
+      if (restarted) {
+        toastManager.add({
+          type: "success",
+          title: "Local backend restarting",
+          description: "OSSCode is reconnecting to the desktop server.",
+        });
+        return;
+      }
+      toastManager.add({
+        type: "error",
+        title: "Unable to restart backend",
+        description: "Check the desktop logs for more detail.",
+      });
+    });
+  }, []);
 
   const addCustomModel = useCallback((provider: ProviderKind) => {
     const customModelInput = customModelInputByProvider[provider];
@@ -352,6 +443,141 @@ function SettingsRouteView() {
                 </div>
               </div>
             </section>
+
+            {isElectron ? (
+              <section className="rounded-2xl border border-border bg-card p-5">
+                <div className="mb-4">
+                  <h2 className="text-sm font-medium text-foreground">Desktop Runtime</h2>
+                  <p className="mt-1 text-xs text-muted-foreground">
+                    Inspect local CLI readiness, backend state, and packaged desktop logs.
+                  </p>
+                </div>
+
+                <div className="space-y-4">
+                  <div className="flex flex-wrap items-center gap-2 rounded-lg border border-border bg-background px-3 py-2 text-xs">
+                    <span className="text-muted-foreground">Backend status</span>
+                    <span className="rounded bg-secondary px-2 py-0.5 font-medium text-foreground">
+                      {desktopRuntimeState?.status ?? "loading"}
+                    </span>
+                    {desktopRuntimeState?.lastExitReason ? (
+                      <span className="text-muted-foreground">
+                        Last exit: {desktopRuntimeState.lastExitReason}
+                      </span>
+                    ) : null}
+                  </div>
+
+                  <div className="flex flex-wrap gap-2">
+                    <Button size="xs" variant="outline" onClick={() => void desktopEnvironmentQuery.refetch()}>
+                      {desktopEnvironmentQuery.isFetching ? "Checking..." : "Run environment doctor"}
+                    </Button>
+                    <Button size="xs" variant="outline" onClick={openDesktopLogs}>
+                      Open desktop logs
+                    </Button>
+                    <Button size="xs" variant="outline" onClick={restartDesktopBackend}>
+                      Restart backend
+                    </Button>
+                  </div>
+
+                  {desktopEnvironmentQuery.error ? (
+                    <p className="text-xs text-destructive">
+                      {desktopEnvironmentQuery.error instanceof Error
+                        ? desktopEnvironmentQuery.error.message
+                        : "Unable to load desktop diagnostics."}
+                    </p>
+                  ) : null}
+
+                  {desktopEnvironmentQuery.data ? (
+                    <div className="space-y-4">
+                      <div className="grid gap-3 sm:grid-cols-2">
+                        <div className="rounded-lg border border-border bg-background px-3 py-2">
+                          <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+                            App
+                          </p>
+                          <p className="mt-1 text-xs text-foreground">
+                            {desktopEnvironmentQuery.data.appVersion} on{" "}
+                            {desktopEnvironmentQuery.data.platform}/{desktopEnvironmentQuery.data.arch}
+                          </p>
+                          <p className="mt-1 text-[11px] text-muted-foreground">
+                            Electron {desktopEnvironmentQuery.data.electronVersion}
+                          </p>
+                        </div>
+                        <div className="rounded-lg border border-border bg-background px-3 py-2">
+                          <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+                            Shell
+                          </p>
+                          <p className="mt-1 break-all font-mono text-[11px] text-foreground">
+                            {desktopEnvironmentQuery.data.shell ?? "Unknown"}
+                          </p>
+                          <p className="mt-1 text-[11px] text-muted-foreground">
+                            PATH entries: {desktopEnvironmentQuery.data.pathEntries.length}
+                          </p>
+                        </div>
+                      </div>
+
+                      <div className="space-y-2">
+                        <div className="rounded-lg border border-border bg-background px-3 py-2">
+                          <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+                            State directory
+                          </p>
+                          <p className="mt-1 break-all font-mono text-[11px] text-foreground">
+                            {desktopEnvironmentQuery.data.stateDirectory}
+                          </p>
+                        </div>
+                        <div className="rounded-lg border border-border bg-background px-3 py-2">
+                          <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+                            Log directory
+                          </p>
+                          <p className="mt-1 break-all font-mono text-[11px] text-foreground">
+                            {desktopEnvironmentQuery.data.logDirectory}
+                          </p>
+                        </div>
+                      </div>
+
+                      <div className="space-y-2">
+                        <p className="text-xs font-medium text-foreground">Provider checks</p>
+                        {desktopEnvironmentQuery.data.providerDiagnostics.map((diagnostic) => (
+                          <div
+                            key={diagnostic.provider}
+                            className="rounded-lg border border-border bg-background px-3 py-3"
+                          >
+                            <div className="flex flex-wrap items-center justify-between gap-2">
+                              <div>
+                                <p className="text-sm font-medium text-foreground">
+                                  {diagnostic.provider}
+                                </p>
+                                <p className="mt-1 break-all font-mono text-[11px] text-muted-foreground">
+                                  {diagnostic.binaryPath}
+                                </p>
+                              </div>
+                              <span
+                                className={`rounded px-2 py-0.5 text-[10px] font-medium uppercase tracking-wide ${
+                                  diagnostic.status === "ready"
+                                    ? "bg-emerald-500/12 text-emerald-600"
+                                    : diagnostic.status === "warning"
+                                      ? "bg-amber-500/12 text-amber-600"
+                                      : "bg-rose-500/12 text-rose-600"
+                                }`}
+                              >
+                                {diagnostic.status}
+                              </span>
+                            </div>
+                            <div className="mt-2 flex flex-wrap gap-3 text-[11px] text-muted-foreground">
+                              <span>Version: {diagnostic.version ?? "Unavailable"}</span>
+                              <span>Auth: {diagnostic.authStatus}</span>
+                            </div>
+                            {diagnostic.message ? (
+                              <p className="mt-2 text-xs text-muted-foreground">
+                                {diagnostic.message}
+                              </p>
+                            ) : null}
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  ) : null}
+                </div>
+              </section>
+            ) : null}
 
             <section className="rounded-2xl border border-border bg-card p-5">
               <div className="mb-4">
