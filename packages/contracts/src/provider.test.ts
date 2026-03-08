@@ -42,6 +42,19 @@ describe("ProviderSessionStartInput", () => {
       }),
     ).toThrow();
   });
+
+  it("accepts Claude Code provider payloads", () => {
+    const parsed = decodeProviderSessionStartInput({
+      threadId: "thread-1",
+      provider: "claudeCode",
+      cwd: "/tmp/workspace",
+      model: "sonnet",
+      runtimeMode: "full-access",
+    });
+
+    expect(parsed.provider).toBe("claudeCode");
+    expect(parsed.model).toBe("sonnet");
+  });
 });
 
 describe("ProviderSendTurnInput", () => {
