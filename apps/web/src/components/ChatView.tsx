@@ -147,6 +147,8 @@ import {
   CopyIcon,
   CheckIcon,
   ZapIcon,
+  PencilIcon,
+  SendIcon,
 } from "lucide-react";
 import { Button } from "./ui/button";
 import { Input } from "./ui/input";
@@ -644,6 +646,11 @@ export default function ChatView({ threadId }: ChatViewProps) {
   const [sendStartedAt, setSendStartedAt] = useState<string | null>(null);
   const [isConnecting, _setIsConnecting] = useState(false);
   const [isRevertingCheckpoint, setIsRevertingCheckpoint] = useState(false);
+  const [queuedFollowUp, setQueuedFollowUp] = useState<{
+    text: string;
+    images: ComposerImageAttachment[];
+  } | null>(null);
+  const autoSubmitPendingRef = useRef(false);
   const [respondingRequestIds, setRespondingRequestIds] = useState<ApprovalRequestId[]>([]);
   const [respondingUserInputRequestIds, setRespondingUserInputRequestIds] = useState<
     ApprovalRequestId[]
@@ -2172,6 +2179,29 @@ export default function ChatView({ threadId }: ChatViewProps) {
     sendPhase,
   ]);
 
+  // Track phase transitions to auto-send queued follow-up when generation finishes
+  const prevPhaseRef = useRef(phase);
+  useEffect(() => {
+    const prevPhase = prevPhaseRef.current;
+    prevPhaseRef.current = phase;
+    if (prevPhase === "running" && phase !== "running" && queuedFollowUp) {
+      setPrompt(queuedFollowUp.text);
+      if (queuedFollowUp.images.length > 0) {
+        addComposerImagesToDraft(queuedFollowUp.images);
+      }
+      setQueuedFollowUp(null);
+      autoSubmitPendingRef.current = true;
+    }
+  }, [phase, queuedFollowUp, setPrompt, addComposerImagesToDraft]);
+
+  // Submit the form once the queued prompt has been restored to the composer
+  useEffect(() => {
+    if (autoSubmitPendingRef.current && prompt.trim() && phase !== "running" && !isSendBusy) {
+      autoSubmitPendingRef.current = false;
+      composerFormRef.current?.requestSubmit();
+    }
+  }, [prompt, phase, isSendBusy]);
+
   useEffect(() => {
     if (!activeThreadId) return;
     const previous = terminalOpenByThreadRef.current[activeThreadId] ?? false;
@@ -2432,6 +2462,17 @@ export default function ChatView({ threadId }: ChatViewProps) {
       return;
     }
     const trimmed = prompt.trim();
+    // Queue the message if the model is currently generating
+    if (phase === "running") {
+      if (!trimmed && composerImages.length === 0) return;
+      setQueuedFollowUp({ text: trimmed, images: [...composerImages] });
+      promptRef.current = "";
+      clearComposerDraftContent(activeThread.id);
+      setComposerHighlightedItemId(null);
+      setComposerCursor(0);
+      setComposerTrigger(null);
+      return;
+    }
     if (showPlanFollowUpPrompt && activeProposedPlan) {
       const followUp = resolvePlanFollowUpSubmission({
         draftText: trimmed,
@@ -3485,6 +3526,57 @@ export default function ChatView({ threadId }: ChatViewProps) {
 
       {/* Input bar */}
       <div className={cn("px-3 pt-1.5 sm:px-5 sm:pt-2", isGitRepo ? "pb-1" : "pb-3 sm:pb-4")}>
+        {/* Queued follow-up banner */}
+        {queuedFollowUp ? (
+          <div className="mx-auto mb-2 w-full min-w-0 max-w-3xl">
+            <div className="rounded-[14px] border border-border bg-card px-3 py-2">
+              <div className="mb-1.5 flex items-center justify-between">
+                <span className="text-xs font-medium text-muted-foreground">1 Queued</span>
+                <div className="flex items-center gap-1">
+                  {/* Edit: restore to composer */}
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon-xs"
+                    aria-label="Edit queued message"
+                    onClick={() => {
+                      setPrompt(queuedFollowUp.text);
+                      if (queuedFollowUp.images.length > 0) {
+                        addComposerImagesToDraft(queuedFollowUp.images);
+                      }
+                      setQueuedFollowUp(null);
+                    }}
+                  >
+                    <PencilIcon className="size-3" />
+                  </Button>
+                  {/* Send now: interrupt + auto-send */}
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon-xs"
+                    aria-label="Send queued message now"
+                    onClick={() => {
+                      void onInterrupt();
+                    }}
+                  >
+                    <SendIcon className="size-3" />
+                  </Button>
+                  {/* Discard */}
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon-xs"
+                    aria-label="Discard queued message"
+                    onClick={() => setQueuedFollowUp(null)}
+                  >
+                    <XIcon className="size-3" />
+                  </Button>
+                </div>
+              </div>
+              <p className="line-clamp-2 text-sm text-foreground/80">{queuedFollowUp.text}</p>
+            </div>
+          </div>
+        ) : null}
         <form
           ref={composerFormRef}
           onSubmit={onSend}
@@ -3631,6 +3723,8 @@ export default function ChatView({ threadId }: ChatViewProps) {
                     ? "Type your own answer, or leave this blank to use the selected option"
                     : showPlanFollowUpPrompt && activeProposedPlan
                       ? "Add feedback to refine the plan, or leave this blank to implement it"
+                      : phase === "running"
+                      ? "Queue a follow-up message..."
                       : phase === "disconnected"
                         ? "Ask for follow-up changes or attach images"
                         : "Ask anything, @tag files/folders, or use /model"
@@ -3760,22 +3854,34 @@ export default function ChatView({ threadId }: ChatViewProps) {
                       </Button>
                     </div>
                   ) : phase === "running" ? (
-                    <button
-                      type="button"
-                      className="flex size-8 items-center justify-center rounded-full bg-rose-500/90 text-white transition-all duration-150 hover:bg-rose-500 hover:scale-105 sm:h-8 sm:w-8"
-                      onClick={() => void onInterrupt()}
-                      aria-label="Stop generation"
-                    >
-                      <svg
-                        width="12"
-                        height="12"
-                        viewBox="0 0 12 12"
-                        fill="currentColor"
-                        aria-hidden="true"
+                    <div className="flex items-center gap-2">
+                      {prompt.trim() || composerImages.length > 0 ? (
+                        <button
+                          type="submit"
+                          className="flex h-8 items-center justify-center gap-1.5 rounded-full bg-primary/90 px-3 text-xs font-medium text-primary-foreground transition-all duration-150 hover:bg-primary hover:scale-105"
+                          aria-label="Queue message"
+                        >
+                          <SendIcon className="size-3" />
+                          Queue
+                        </button>
+                      ) : null}
+                      <button
+                        type="button"
+                        className="flex size-8 items-center justify-center rounded-full bg-rose-500/90 text-white transition-all duration-150 hover:bg-rose-500 hover:scale-105 sm:h-8 sm:w-8"
+                        onClick={() => void onInterrupt()}
+                        aria-label="Stop generation"
                       >
-                        <rect x="2" y="2" width="8" height="8" rx="1.5" />
-                      </svg>
-                    </button>
+                        <svg
+                          width="12"
+                          height="12"
+                          viewBox="0 0 12 12"
+                          fill="currentColor"
+                          aria-hidden="true"
+                        >
+                          <rect x="2" y="2" width="8" height="8" rx="1.5" />
+                        </svg>
+                      </button>
+                    </div>
                   ) : pendingUserInputs.length === 0 ? (
                     showPlanFollowUpPrompt ? (
                       prompt.trim().length > 0 ? (
