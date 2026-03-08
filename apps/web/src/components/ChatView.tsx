@@ -114,6 +114,38 @@ import {
   type TurnDiffFileChange,
   type TurnDiffSummary,
 } from "../types";
+
+const INTERACTION_MODE_LABELS: Record<ProviderInteractionMode, string> = {
+  default: "Chat",
+  plan: "Plan",
+  ask: "Ask",
+  debug: "Debug",
+};
+
+const INTERACTION_MODE_OPTIONS: readonly ProviderInteractionMode[] = [
+  "default",
+  "plan",
+  "ask",
+  "debug",
+];
+const INTERACTION_MODE_COLOR_CLASSNAMES: Record<ProviderInteractionMode, string> = {
+  default: "text-sky-600 dark:text-sky-400",
+  plan: "text-amber-600 dark:text-amber-400",
+  ask: "text-emerald-600 dark:text-emerald-400",
+  debug: "text-rose-600 dark:text-rose-400",
+};
+const REASONING_EFFORT_LABELS: Record<ReasoningEffort, string> = {
+  low: "Low",
+  medium: "Medium",
+  high: "High",
+  xhigh: "Extra High",
+};
+const REASONING_EFFORT_COLOR_CLASSNAMES: Record<ReasoningEffort, string> = {
+  low: "text-emerald-600 dark:text-emerald-400",
+  medium: "text-amber-600 dark:text-amber-400",
+  high: "text-orange-600 dark:text-orange-400",
+  xhigh: "text-red-600 dark:text-red-400",
+};
 import { basenameOfPath, getVscodeIconUrlForEntry } from "../vscode-icons";
 import { useTheme } from "../hooks/useTheme";
 import { useTurnDiffSummaries } from "../hooks/useTurnDiffSummaries";
@@ -1303,18 +1335,32 @@ export default function ChatView({ threadId }: ChatViewProps) {
           description: "Switch response model for this thread",
         },
         {
-          id: "slash:plan",
-          type: "slash-command",
-          command: "plan",
-          label: "/plan",
-          description: "Switch this thread into plan mode",
-        },
-        {
           id: "slash:default",
           type: "slash-command",
           command: "default",
           label: "/default",
-          description: "Switch this thread back to normal chat mode",
+          description: "Switch to normal chat mode",
+        },
+        {
+          id: "slash:plan",
+          type: "slash-command",
+          command: "plan",
+          label: "/plan",
+          description: "Switch to plan mode (no edits)",
+        },
+        {
+          id: "slash:ask",
+          type: "slash-command",
+          command: "ask",
+          label: "/ask",
+          description: "Switch to ask mode (Q&A only)",
+        },
+        {
+          id: "slash:debug",
+          type: "slash-command",
+          command: "debug",
+          label: "/debug",
+          description: "Switch to debug mode",
         },
       ] satisfies ReadonlyArray<Extract<ComposerCommandItem, { type: "slash-command" }>>;
       const query = composerTrigger.query.trim().toLowerCase();
@@ -1738,9 +1784,6 @@ export default function ChatView({ threadId }: ChatViewProps) {
       threadId,
     ],
   );
-  const toggleInteractionMode = useCallback(() => {
-    handleInteractionModeChange(interactionMode === "plan" ? "default" : "plan");
-  }, [handleInteractionModeChange, interactionMode]);
 
   const persistThreadSettingsForNextTurn = useCallback(
     async (input: {
@@ -3379,7 +3422,14 @@ export default function ChatView({ threadId }: ChatViewProps) {
           }
           return;
         }
-        void handleInteractionModeChange(item.command === "plan" ? "plan" : "default");
+        if (
+          item.command === "plan" ||
+          item.command === "ask" ||
+          item.command === "debug" ||
+          item.command === "default"
+        ) {
+          void handleInteractionModeChange(item.command as ProviderInteractionMode);
+        }
         const applied = applyPromptReplacement(trigger.rangeStart, trigger.rangeEnd, "", {
           expectedText: expectedToken,
         });
@@ -3469,11 +3519,6 @@ export default function ChatView({ threadId }: ChatViewProps) {
     key: "ArrowDown" | "ArrowUp" | "Enter" | "Tab",
     event: KeyboardEvent,
   ) => {
-    if (key === "Tab" && event.shiftKey) {
-      toggleInteractionMode();
-      return true;
-    }
-
     const { trigger } = resolveActiveComposerTrigger();
     const menuIsActive = composerMenuOpenRef.current || trigger !== null;
 
@@ -3917,24 +3962,11 @@ export default function ChatView({ threadId }: ChatViewProps) {
                   {/* Divider */}
                   <Separator orientation="vertical" className="mx-0.5 hidden h-4 sm:block" />
 
-                  {/* Interaction mode toggle */}
-                  <Button
-                    variant="ghost"
-                    className="shrink-0 whitespace-nowrap px-2 text-muted-foreground/70 hover:text-foreground/80 sm:px-3"
-                    size="sm"
-                    type="button"
-                    onClick={toggleInteractionMode}
-                    title={
-                      interactionMode === "plan"
-                        ? "Plan mode — click to return to normal chat mode"
-                        : "Default mode — click to enter plan mode"
-                    }
-                  >
-                    <BotIcon />
-                    <span className="sr-only sm:not-sr-only">
-                      {interactionMode === "plan" ? "Plan" : "Chat"}
-                    </span>
-                  </Button>
+                  {/* Interaction mode picker */}
+                  <InteractionModePicker
+                    interactionMode={interactionMode}
+                    onInteractionModeChange={handleInteractionModeChange}
+                  />
 
                   {/* Divider */}
                   <Separator orientation="vertical" className="mx-0.5 hidden h-4 sm:block" />
@@ -5867,6 +5899,79 @@ const ProviderModelPicker = memo(function ProviderModelPicker(props: {
   );
 });
 
+const InteractionModePicker = memo(function InteractionModePicker(props: {
+  interactionMode: ProviderInteractionMode;
+  disabled?: boolean;
+  onInteractionModeChange: (mode: ProviderInteractionMode) => void;
+}) {
+  const [isMenuOpen, setIsMenuOpen] = useState(false);
+
+  return (
+    <Menu
+      open={isMenuOpen}
+      onOpenChange={(open) => {
+        if (props.disabled) {
+          setIsMenuOpen(false);
+          return;
+        }
+        setIsMenuOpen(open);
+      }}
+    >
+      <MenuTrigger
+        render={
+          <Button
+            aria-label={`Interaction mode: ${INTERACTION_MODE_LABELS[props.interactionMode]}`}
+            className="shrink-0 whitespace-nowrap px-2 text-muted-foreground/70 hover:text-foreground/80 sm:px-3"
+            data-interaction-mode-trigger="true"
+            disabled={props.disabled}
+            size="sm"
+            title={`${INTERACTION_MODE_LABELS[props.interactionMode]} mode`}
+            variant="ghost"
+          />
+        }
+      >
+        <span className="flex min-w-0 items-center gap-2">
+          <BotIcon
+            aria-hidden="true"
+            className={cn("size-4 shrink-0", INTERACTION_MODE_COLOR_CLASSNAMES[props.interactionMode])}
+          />
+          <span
+            className={cn(
+              "truncate",
+              INTERACTION_MODE_COLOR_CLASSNAMES[props.interactionMode],
+            )}
+          >
+            {INTERACTION_MODE_LABELS[props.interactionMode]}
+          </span>
+          <ChevronDownIcon aria-hidden="true" className="size-3 opacity-60" />
+        </span>
+      </MenuTrigger>
+      <MenuPopup align="start">
+        <MenuGroup>
+          <MenuGroupLabel>Interaction mode</MenuGroupLabel>
+          <MenuRadioGroup
+            value={props.interactionMode}
+            onValueChange={(value) => {
+              const nextMode = INTERACTION_MODE_OPTIONS.find((mode) => mode === value);
+              if (!nextMode) return;
+              props.onInteractionModeChange(nextMode);
+              setIsMenuOpen(false);
+            }}
+          >
+            {INTERACTION_MODE_OPTIONS.map((mode) => (
+              <MenuRadioItem key={mode} value={mode}>
+                <span className={INTERACTION_MODE_COLOR_CLASSNAMES[mode]}>
+                  {INTERACTION_MODE_LABELS[mode]}
+                </span>
+              </MenuRadioItem>
+            ))}
+          </MenuRadioGroup>
+        </MenuGroup>
+      </MenuPopup>
+    </Menu>
+  );
+});
+
 const ReasoningTraitsPicker = memo(function ReasoningTraitsPicker(props: {
   effort: ReasoningEffort;
   fastModeEnabled?: boolean | null;
@@ -5878,19 +5983,7 @@ const ReasoningTraitsPicker = memo(function ReasoningTraitsPicker(props: {
   const defaultReasoningEffort = props.options.includes("xhigh")
     ? getDefaultReasoningEffort("codex")
     : getDefaultReasoningEffort("claudeCode");
-  const reasoningLabelByOption: Record<ReasoningEffort, string> = {
-    low: "Low",
-    medium: "Medium",
-    high: "High",
-    xhigh: "Extra High",
-  };
   const showFastMode = props.onFastModeChange != null;
-  const triggerLabel = [
-    reasoningLabelByOption[props.effort],
-    ...(showFastMode && props.fastModeEnabled ? ["Fast"] : []),
-  ]
-    .filter(Boolean)
-    .join(" · ");
 
   return (
     <Menu
@@ -5908,7 +6001,14 @@ const ReasoningTraitsPicker = memo(function ReasoningTraitsPicker(props: {
           />
         }
       >
-        <span>{triggerLabel}</span>
+        <span
+          className={cn("font-medium", REASONING_EFFORT_COLOR_CLASSNAMES[props.effort])}
+        >
+          {REASONING_EFFORT_LABELS[props.effort]}
+        </span>
+        {showFastMode && props.fastModeEnabled ? (
+          <span className="text-muted-foreground/70">· Fast</span>
+        ) : null}
         <ChevronDownIcon aria-hidden="true" className="size-3 opacity-60" />
       </MenuTrigger>
       <MenuPopup align="start">
@@ -5925,7 +6025,9 @@ const ReasoningTraitsPicker = memo(function ReasoningTraitsPicker(props: {
           >
             {props.options.map((effort) => (
               <MenuRadioItem key={effort} value={effort}>
-                {reasoningLabelByOption[effort]}
+                <span className={cn("font-medium", REASONING_EFFORT_COLOR_CLASSNAMES[effort])}>
+                  {REASONING_EFFORT_LABELS[effort]}
+                </span>
                 {defaultReasoningEffort !== null && effort === defaultReasoningEffort
                   ? " (default)"
                   : ""}

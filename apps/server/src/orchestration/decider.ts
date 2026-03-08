@@ -304,12 +304,11 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
           ...(command.serviceTier !== undefined ? { serviceTier: command.serviceTier } : {}),
           ...(command.modelOptions !== undefined ? { modelOptions: command.modelOptions } : {}),
           assistantDeliveryMode: command.assistantDeliveryMode ?? DEFAULT_ASSISTANT_DELIVERY_MODE,
-          runtimeMode:
-            readModel.threads.find((entry) => entry.id === command.threadId)?.runtimeMode ??
-            command.runtimeMode,
-          interactionMode:
-            readModel.threads.find((entry) => entry.id === command.threadId)?.interactionMode ??
-            command.interactionMode,
+          // The client includes the currently selected modes on each send, so
+          // preserve those explicit values even if the thread projection has not
+          // observed a preceding mode-update command yet.
+          runtimeMode: command.runtimeMode,
+          interactionMode: command.interactionMode,
           createdAt: command.createdAt,
         },
       };

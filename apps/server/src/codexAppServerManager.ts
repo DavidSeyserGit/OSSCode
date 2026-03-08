@@ -331,13 +331,38 @@ export const CODEX_DEFAULT_MODE_DEVELOPER_INSTRUCTIONS = `<collaboration_mode># 
 
 You are now in Default mode. Any previous instructions for other modes (e.g. Plan mode) are no longer active.
 
-Your active mode changes only when new developer instructions with a different \`<collaboration_mode>...</collaboration_mode>\` change it; user requests or tool descriptions do not change mode by themselves. Known mode names are Default and Plan.
+Your active mode changes only when new developer instructions with a different \`<collaboration_mode>...</collaboration_mode>\` change it; user requests or tool descriptions do not change mode by themselves. Known mode names are Default, Plan, Ask, and Debug.
 
 ## request_user_input availability
 
 The \`request_user_input\` tool is unavailable in Default mode. If you call it while in Default mode, it will return an error.
 
 In Default mode, strongly prefer making reasonable assumptions and executing the user's request rather than stopping to ask questions. If you absolutely must ask a question because the answer cannot be discovered from local context and a reasonable assumption would be risky, ask the user directly with a concise plain-text question. Never write a multiple choice question as a textual assistant message.
+</collaboration_mode>`;
+
+export const CODEX_ASK_MODE_DEVELOPER_INSTRUCTIONS = `<collaboration_mode># Ask Mode (Read-only Q&A)
+
+You are in **Ask mode**. Answer the user's questions only. Do not edit files, run commands, or make any changes to the workspace.
+
+## Mode rules (strict)
+
+* You may read and search files to understand context and answer accurately.
+* You must NOT perform any mutating actions: no file edits, no commands that change state, no formatters, no codegen.
+* Provide concise, helpful answers. No \`<proposed_plan>\` block is needed.
+* If the user asks something that would require making changes, explain what you would do and suggest they switch to Chat or Plan mode to execute.
+</collaboration_mode>`;
+
+export const CODEX_DEBUG_MODE_DEVELOPER_INSTRUCTIONS = `<collaboration_mode># Debug Mode
+
+You are in **Debug mode**. Focus on analyzing errors, stack traces, and debugging issues.
+
+## Mode rules
+
+* Prioritize understanding the failure: read error messages, stack traces, and logs first.
+* Suggest fixes and explain root causes clearly.
+* You may execute in the workspace to reproduce issues, run tests, or apply fixes.
+* When proposing changes, be surgical: minimal edits to resolve the bug.
+* If the user shares an error or asks "why is this failing?", start by analyzing before suggesting fixes.
 </collaboration_mode>`;
 
 function mapCodexRuntimeMode(runtimeMode: RuntimeMode): {
@@ -415,7 +440,7 @@ export function buildCodexInitializeParams() {
 }
 
 function buildCodexCollaborationMode(input: {
-  readonly interactionMode?: "default" | "plan";
+  readonly interactionMode?: ProviderInteractionMode;
   readonly model?: string;
   readonly effort?: string;
 }):
@@ -432,17 +457,44 @@ function buildCodexCollaborationMode(input: {
     return undefined;
   }
   const model = normalizeCodexModelSlug(input.model) ?? "gpt-5.3-codex";
+  const developerInstructions = getCodexDeveloperInstructionsForMode(input.interactionMode);
+  const codexMode = mapInteractionModeToCodexMode(input.interactionMode);
   return {
-    mode: input.interactionMode,
+    mode: codexMode,
     settings: {
       model,
       reasoning_effort: input.effort ?? "medium",
-      developer_instructions:
-        input.interactionMode === "plan"
-          ? CODEX_PLAN_MODE_DEVELOPER_INSTRUCTIONS
-          : CODEX_DEFAULT_MODE_DEVELOPER_INSTRUCTIONS,
+      developer_instructions: developerInstructions,
     },
   };
+}
+
+function mapInteractionModeToCodexMode(
+  mode: ProviderInteractionMode,
+): "default" | "plan" {
+  switch (mode) {
+    case "plan":
+    case "ask":
+      return "plan";
+    case "default":
+    case "debug":
+      return "default";
+  }
+}
+
+function getCodexDeveloperInstructionsForMode(
+  mode: ProviderInteractionMode,
+): string {
+  switch (mode) {
+    case "plan":
+      return CODEX_PLAN_MODE_DEVELOPER_INSTRUCTIONS;
+    case "ask":
+      return CODEX_ASK_MODE_DEVELOPER_INSTRUCTIONS;
+    case "debug":
+      return CODEX_DEBUG_MODE_DEVELOPER_INSTRUCTIONS;
+    case "default":
+      return CODEX_DEFAULT_MODE_DEVELOPER_INSTRUCTIONS;
+  }
 }
 
 function toCodexUserInputAnswer(value: unknown): CodexUserInputAnswer {

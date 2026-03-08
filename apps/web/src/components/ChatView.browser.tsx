@@ -395,20 +395,27 @@ async function waitForElement<T extends Element>(
   return element;
 }
 
-async function waitForComposerEditor(): Promise<HTMLElement> {
+async function waitForInteractionModeButton(
+  expectedLabel: "Chat" | "Plan" | "Ask" | "Debug",
+): Promise<HTMLButtonElement> {
   return waitForElement(
-    () => document.querySelector<HTMLElement>('[contenteditable="true"]'),
-    "Unable to find composer editor.",
+    () => {
+      const button = document.querySelector<HTMLButtonElement>('[data-interaction-mode-trigger="true"]');
+      return button?.textContent?.trim() === expectedLabel ? button : null;
+    },
+    `Unable to find ${expectedLabel} interaction mode button.`,
   );
 }
 
-async function waitForInteractionModeButton(expectedLabel: "Chat" | "Plan"): Promise<HTMLButtonElement> {
+async function waitForInteractionModeMenuItem(
+  expectedLabel: "Chat" | "Plan" | "Ask" | "Debug",
+): Promise<HTMLElement> {
   return waitForElement(
     () =>
-      Array.from(document.querySelectorAll("button")).find(
-        (button) => button.textContent?.trim() === expectedLabel,
-      ) as HTMLButtonElement | null,
-    `Unable to find ${expectedLabel} interaction mode button.`,
+      Array.from(document.querySelectorAll<HTMLElement>('[data-slot="menu-radio-item"]')).find(
+        (item) => item.textContent?.trim() === expectedLabel,
+      ) ?? null,
+    `Unable to find ${expectedLabel} interaction mode menu item.`,
   );
 }
 
@@ -806,7 +813,7 @@ describe("ChatView timeline estimator parity (full app)", () => {
     }
   });
 
-  it("toggles plan mode with Shift+Tab only while the composer is focused", async () => {
+  it("opens the interaction mode menu and only changes mode after selection", async () => {
     const mounted = await mountChatView({
       viewport: DEFAULT_VIEWPORT,
       snapshot: createSnapshotForTargetUser({
@@ -817,52 +824,29 @@ describe("ChatView timeline estimator parity (full app)", () => {
 
     try {
       const initialModeButton = await waitForInteractionModeButton("Chat");
-      expect(initialModeButton.title).toContain("enter plan mode");
+      expect(initialModeButton.title).toBe("Chat mode");
 
-      window.dispatchEvent(
-        new KeyboardEvent("keydown", {
-          key: "Tab",
-          shiftKey: true,
-          bubbles: true,
-          cancelable: true,
-        }),
-      );
-      await waitForLayout();
+      initialModeButton.click();
+      await waitForInteractionModeMenuItem("Plan");
+      expect((await waitForInteractionModeButton("Chat")).title).toBe("Chat mode");
 
-      expect((await waitForInteractionModeButton("Chat")).title).toContain("enter plan mode");
-
-      const composerEditor = await waitForComposerEditor();
-      composerEditor.focus();
-      composerEditor.dispatchEvent(
-        new KeyboardEvent("keydown", {
-          key: "Tab",
-          shiftKey: true,
-          bubbles: true,
-          cancelable: true,
-        }),
-      );
-
+      (await waitForInteractionModeMenuItem("Plan")).click();
       await vi.waitFor(
         async () => {
-          expect((await waitForInteractionModeButton("Plan")).title).toContain(
-            "return to normal chat mode",
-          );
+          expect((await waitForInteractionModeButton("Plan")).title).toBe("Plan mode");
         },
         { timeout: 8_000, interval: 16 },
       );
 
-      composerEditor.dispatchEvent(
-        new KeyboardEvent("keydown", {
-          key: "Tab",
-          shiftKey: true,
-          bubbles: true,
-          cancelable: true,
-        }),
-      );
+      const planModeButton = await waitForInteractionModeButton("Plan");
+      planModeButton.click();
+      await waitForInteractionModeMenuItem("Ask");
+      expect((await waitForInteractionModeButton("Plan")).title).toBe("Plan mode");
 
+      (await waitForInteractionModeMenuItem("Ask")).click();
       await vi.waitFor(
         async () => {
-          expect((await waitForInteractionModeButton("Chat")).title).toContain("enter plan mode");
+          expect((await waitForInteractionModeButton("Ask")).title).toBe("Ask mode");
         },
         { timeout: 8_000, interval: 16 },
       );

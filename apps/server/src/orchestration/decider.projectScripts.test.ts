@@ -201,6 +201,89 @@ describe("decider project scripts", () => {
     });
   });
 
+  it("preserves explicit turn modes even when the stored thread modes are stale", async () => {
+    const now = new Date().toISOString();
+    const initial = createEmptyReadModel(now);
+    const withProject = await Effect.runPromise(
+      projectEvent(initial, {
+        sequence: 1,
+        eventId: asEventId("evt-project-create-turn-modes"),
+        aggregateKind: "project",
+        aggregateId: asProjectId("project-1"),
+        type: "project.created",
+        occurredAt: now,
+        commandId: CommandId.makeUnsafe("cmd-project-create-turn-modes"),
+        causationEventId: null,
+        correlationId: CommandId.makeUnsafe("cmd-project-create-turn-modes"),
+        metadata: {},
+        payload: {
+          projectId: asProjectId("project-1"),
+          title: "Project",
+          workspaceRoot: "/tmp/project",
+          defaultModel: null,
+          scripts: [],
+          createdAt: now,
+          updatedAt: now,
+        },
+      }),
+    );
+    const readModel = await Effect.runPromise(
+      projectEvent(withProject, {
+        sequence: 2,
+        eventId: asEventId("evt-thread-create-turn-modes"),
+        aggregateKind: "thread",
+        aggregateId: ThreadId.makeUnsafe("thread-1"),
+        type: "thread.created",
+        occurredAt: now,
+        commandId: CommandId.makeUnsafe("cmd-thread-create-turn-modes"),
+        causationEventId: null,
+        correlationId: CommandId.makeUnsafe("cmd-thread-create-turn-modes"),
+        metadata: {},
+        payload: {
+          threadId: ThreadId.makeUnsafe("thread-1"),
+          projectId: asProjectId("project-1"),
+          title: "Thread",
+          model: "gpt-5-codex",
+          interactionMode: "default",
+          runtimeMode: "approval-required",
+          branch: null,
+          worktreePath: null,
+          createdAt: now,
+          updatedAt: now,
+        },
+      }),
+    );
+
+    const result = await Effect.runPromise(
+      decideOrchestrationCommand({
+        command: {
+          type: "thread.turn.start",
+          commandId: CommandId.makeUnsafe("cmd-turn-start-explicit-modes"),
+          threadId: ThreadId.makeUnsafe("thread-1"),
+          message: {
+            messageId: asMessageId("message-user-explicit-modes"),
+            role: "user",
+            text: "debug this failure",
+            attachments: [],
+          },
+          interactionMode: "debug",
+          runtimeMode: "full-access",
+          createdAt: now,
+        },
+        readModel,
+      }),
+    );
+
+    const events = Array.isArray(result) ? result : [result];
+    const turnStartEvent = events[1];
+    expect(turnStartEvent?.type).toBe("thread.turn-start-requested");
+    if (turnStartEvent?.type !== "thread.turn-start-requested") {
+      return;
+    }
+    expect(turnStartEvent.payload.runtimeMode).toBe("full-access");
+    expect(turnStartEvent.payload.interactionMode).toBe("debug");
+  });
+
   it("emits thread.runtime-mode-set from thread.runtime-mode.set", async () => {
     const now = new Date().toISOString();
     const initial = createEmptyReadModel(now);

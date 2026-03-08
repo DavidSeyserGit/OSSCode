@@ -3,6 +3,7 @@ import {
   CommandId,
   EventId,
   type OrchestrationEvent,
+  type ProviderInteractionMode,
   type ProviderModelOptions,
   type ProviderKind,
   type ProviderServiceTier,
@@ -304,7 +305,7 @@ const make = Effect.gen(function* () {
     readonly model?: string;
     readonly serviceTier?: ProviderServiceTier | null;
     readonly modelOptions?: ProviderModelOptions;
-    readonly interactionMode?: "default" | "plan";
+    readonly interactionMode?: ProviderInteractionMode;
     readonly createdAt: string;
   }) {
     const thread = yield* resolveThread(input.threadId);

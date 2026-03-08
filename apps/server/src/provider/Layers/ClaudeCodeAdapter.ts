@@ -212,7 +212,7 @@ function buildClaudeArgs(input: {
   readonly effort?: "low" | "medium" | "high";
   readonly addDirectories?: ReadonlyArray<string>;
   readonly runtimeMode: ProviderSession["runtimeMode"];
-  readonly interactionMode?: "default" | "plan";
+  readonly interactionMode?: import("@t3tools/contracts").ProviderInteractionMode;
   readonly conversationStarted: boolean;
 }): string[] {
   const args = [
@@ -244,7 +244,7 @@ function buildClaudeArgs(input: {
     args.push("--add-dir", ...addDirectories);
   }
 
-  if (input.interactionMode === "plan") {
+  if (input.interactionMode === "plan" || input.interactionMode === "ask") {
     args.push("--agent", "Plan");
   }
 

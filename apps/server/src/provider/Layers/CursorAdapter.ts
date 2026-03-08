@@ -206,7 +206,7 @@ function buildCursorArgs(input: {
   readonly model?: string;
   readonly addDirectories?: ReadonlyArray<string>;
   readonly runtimeMode: ProviderSession["runtimeMode"];
-  readonly interactionMode?: "default" | "plan";
+  readonly interactionMode?: import("@t3tools/contracts").ProviderInteractionMode;
   readonly conversationStarted: boolean;
 }): string[] {
   const args = [
@@ -238,7 +238,7 @@ function buildCursorArgs(input: {
     args.push("--yolo");
   }
 
-  if (input.interactionMode === "plan") {
+  if (input.interactionMode === "plan" || input.interactionMode === "ask") {
     args.push("--model", "gpt-5");
   }
 
