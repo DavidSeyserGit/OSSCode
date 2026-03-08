@@ -128,11 +128,22 @@ const INTERACTION_MODE_OPTIONS: readonly ProviderInteractionMode[] = [
   "ask",
   "debug",
 ];
+const COMPOSER_TOOLBAR_TRIGGER_CLASSNAME =
+  "shrink-0 whitespace-nowrap px-2 text-muted-foreground/50 hover:text-foreground/65 sm:px-3";
+const COMPOSER_AMBER_ACCENT_CLASSNAME = "text-amber-800/60 dark:text-amber-200/50";
+const COMPOSER_PRIMARY_ACTION_BUTTON_CLASSNAME =
+  "border-primary/65 bg-primary/72 text-primary-foreground/92 shadow-none hover:bg-primary/80";
 const INTERACTION_MODE_COLOR_CLASSNAMES: Record<ProviderInteractionMode, string> = {
-  default: "text-sky-600 dark:text-sky-400",
-  plan: "text-amber-600 dark:text-amber-400",
-  ask: "text-emerald-600 dark:text-emerald-400",
-  debug: "text-rose-600 dark:text-rose-400",
+  default: "text-sky-700/60 dark:text-sky-200/54",
+  plan: "text-amber-700/60 dark:text-amber-200/54",
+  ask: "text-emerald-700/60 dark:text-emerald-200/54",
+  debug: "text-rose-700/60 dark:text-rose-200/54",
+};
+const COMPOSER_INTERACTION_MODE_BORDER_CLASSNAMES: Record<ProviderInteractionMode, string> = {
+  default: "focus-within:border-sky-500/45 dark:focus-within:border-sky-300/45",
+  plan: "focus-within:border-amber-500/45 dark:focus-within:border-amber-300/45",
+  ask: "focus-within:border-emerald-500/45 dark:focus-within:border-emerald-300/45",
+  debug: "focus-within:border-rose-500/45 dark:focus-within:border-rose-300/45",
 };
 const REASONING_EFFORT_LABELS: Record<ReasoningEffort, string> = {
   low: "Low",
@@ -141,10 +152,10 @@ const REASONING_EFFORT_LABELS: Record<ReasoningEffort, string> = {
   xhigh: "Extra High",
 };
 const REASONING_EFFORT_COLOR_CLASSNAMES: Record<ReasoningEffort, string> = {
-  low: "text-emerald-600 dark:text-emerald-400",
-  medium: "text-amber-600 dark:text-amber-400",
-  high: "text-orange-600 dark:text-orange-400",
-  xhigh: "text-red-600 dark:text-red-400",
+  low: "text-emerald-700/58 dark:text-emerald-200/52",
+  medium: "text-amber-700/58 dark:text-amber-200/52",
+  high: "text-orange-700/58 dark:text-orange-200/52",
+  xhigh: "text-rose-700/58 dark:text-rose-200/52",
 };
 import { basenameOfPath, getVscodeIconUrlForEntry } from "../vscode-icons";
 import { useTheme } from "../hooks/useTheme";
@@ -586,7 +597,7 @@ const ComposerCommandMenuItem = memo(function ComposerCommandMenuItem(props: {
       ) : null}
       <span className="flex min-w-0 items-center gap-1.5 truncate">
         {props.item.type === "model" && props.item.showFastBadge ? (
-          <ZapIcon className="size-3.5 shrink-0 text-amber-500" />
+          <ZapIcon className={cn("size-3.5 shrink-0", COMPOSER_AMBER_ACCENT_CLASSNAME)} />
         ) : null}
         <span className="truncate">{props.item.label}</span>
       </span>
@@ -3744,9 +3755,11 @@ export default function ChatView({ threadId }: ChatViewProps) {
           data-chat-composer-form="true"
         >
           <div
-            className={`group rounded-[20px] border bg-card transition-colors duration-200 focus-within:border-ring/45 ${
-              isDragOverComposer ? "border-primary/70 bg-accent/30" : "border-border"
-            }`}
+            className={cn(
+              "group rounded-[20px] border bg-card transition-colors duration-200",
+              COMPOSER_INTERACTION_MODE_BORDER_CLASSNAMES[interactionMode],
+              isDragOverComposer ? "border-primary/70 bg-accent/30" : "border-border",
+            )}
             onDragEnter={onComposerDragEnter}
             onDragOver={onComposerDragOver}
             onDragLeave={onComposerDragLeave}
@@ -3974,7 +3987,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
                   {/* Runtime mode toggle */}
                   <Button
                     variant="ghost"
-                    className="shrink-0 whitespace-nowrap px-2 text-muted-foreground/70 hover:text-foreground/80 sm:px-3"
+                    className={COMPOSER_TOOLBAR_TRIGGER_CLASSNAME}
                     size="sm"
                     type="button"
                     onClick={() =>
@@ -4036,7 +4049,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
                       {prompt.trim() || composerImages.length > 0 ? (
                         <button
                           type="submit"
-                          className="flex h-8 items-center justify-center gap-1.5 rounded-full bg-primary/90 px-3 text-xs font-medium text-primary-foreground transition-all duration-150 hover:bg-primary hover:scale-105"
+                          className="flex h-8 items-center justify-center gap-1.5 rounded-full border border-primary/65 bg-primary/72 px-3 text-xs font-medium text-primary-foreground/92 transition-colors duration-150 hover:bg-primary/80"
                           aria-label="Queue message"
                         >
                           <SendIcon className="size-3" />
@@ -4045,7 +4058,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
                       ) : null}
                       <button
                         type="button"
-                        className="flex size-8 items-center justify-center rounded-full bg-rose-500/90 text-white transition-all duration-150 hover:bg-rose-500 hover:scale-105 sm:h-8 sm:w-8"
+                        className="flex size-8 items-center justify-center rounded-full bg-rose-400/72 text-white/90 transition-colors duration-150 hover:bg-rose-400/80 sm:h-8 sm:w-8"
                         onClick={() => void onInterrupt()}
                         aria-label="Stop generation"
                       >
@@ -4066,7 +4079,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
                         <Button
                           type="submit"
                           size="sm"
-                          className="h-9 rounded-full px-4 sm:h-8"
+                          className={cn("h-9 rounded-full px-4 sm:h-8", COMPOSER_PRIMARY_ACTION_BUTTON_CLASSNAME)}
                           disabled={isSendBusy || isConnecting}
                         >
                           {isConnecting || isSendBusy ? "Sending..." : "Refine"}
@@ -4076,7 +4089,10 @@ export default function ChatView({ threadId }: ChatViewProps) {
                           <Button
                             type="submit"
                             size="sm"
-                            className="h-9 rounded-l-full rounded-r-none px-4 sm:h-8"
+                            className={cn(
+                              "h-9 rounded-l-full rounded-r-none px-4 sm:h-8",
+                              COMPOSER_PRIMARY_ACTION_BUTTON_CLASSNAME,
+                            )}
                             disabled={isSendBusy || isConnecting}
                           >
                             {isConnecting || isSendBusy ? "Sending..." : "Implement"}
@@ -4087,7 +4103,10 @@ export default function ChatView({ threadId }: ChatViewProps) {
                                 <Button
                                   size="sm"
                                   variant="default"
-                                  className="h-9 rounded-l-none rounded-r-full border-l-white/12 px-2 sm:h-8"
+                                  className={cn(
+                                    "h-9 rounded-l-none rounded-r-full border-l-white/8 px-2 sm:h-8",
+                                    COMPOSER_PRIMARY_ACTION_BUTTON_CLASSNAME,
+                                  )}
                                   aria-label="Implementation actions"
                                   disabled={isSendBusy || isConnecting}
                                 />
@@ -4109,7 +4128,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
                     ) : (
                       <button
                         type="submit"
-                        className="flex h-9 w-9 items-center justify-center rounded-full bg-primary/90 text-primary-foreground transition-all duration-150 hover:bg-primary hover:scale-105 disabled:opacity-30 disabled:hover:scale-100 sm:h-8 sm:w-8"
+                        className="flex h-9 w-9 items-center justify-center rounded-full border border-primary/65 bg-primary/72 text-primary-foreground/92 transition-colors duration-150 hover:bg-primary/80 disabled:opacity-30 sm:h-8 sm:w-8"
                         disabled={
                           isSendBusy ||
                           isConnecting ||
@@ -5789,15 +5808,15 @@ const ProviderModelPicker = memo(function ProviderModelPicker(props: {
           <Button
             size="sm"
             variant="ghost"
-            className="shrink-0 whitespace-nowrap px-2 text-muted-foreground/70 hover:text-foreground/80 sm:px-3"
+            className={COMPOSER_TOOLBAR_TRIGGER_CLASSNAME}
             disabled={props.disabled}
           />
         }
       >
         <span className="flex min-w-0 items-center gap-2">
-          <ProviderIcon aria-hidden="true" className="size-4 shrink-0 text-muted-foreground/70" />
+          <ProviderIcon aria-hidden="true" className="size-4 shrink-0 text-muted-foreground/60" />
           {props.provider === "codex" && shouldShowFastTierIcon(props.model, props.serviceTierSetting) ? (
-            <ZapIcon className="size-3.5 shrink-0 text-amber-500" />
+            <ZapIcon className={cn("size-3.5 shrink-0", COMPOSER_AMBER_ACCENT_CLASSNAME)} />
           ) : null}
           <span className="truncate">{selectedModelLabel}</span>
           <ChevronDownIcon aria-hidden="true" className="size-3 opacity-60" />
@@ -5850,7 +5869,12 @@ const ProviderModelPicker = memo(function ProviderModelPicker(props: {
                             >
                               {option.value === "codex" &&
                               shouldShowFastTierIcon(modelOption.slug, props.serviceTierSetting) ? (
-                                <ZapIcon className="size-3.5 shrink-0 text-amber-500" />
+                                <ZapIcon
+                                  className={cn(
+                                    "size-3.5 shrink-0",
+                                    COMPOSER_AMBER_ACCENT_CLASSNAME,
+                                  )}
+                                />
                               ) : null}
                               {modelOption.name}
                             </MenuRadioItem>
@@ -5921,7 +5945,7 @@ const InteractionModePicker = memo(function InteractionModePicker(props: {
         render={
           <Button
             aria-label={`Interaction mode: ${INTERACTION_MODE_LABELS[props.interactionMode]}`}
-            className="shrink-0 whitespace-nowrap px-2 text-muted-foreground/70 hover:text-foreground/80 sm:px-3"
+            className={COMPOSER_TOOLBAR_TRIGGER_CLASSNAME}
             data-interaction-mode-trigger="true"
             disabled={props.disabled}
             size="sm"
@@ -5997,7 +6021,7 @@ const ReasoningTraitsPicker = memo(function ReasoningTraitsPicker(props: {
           <Button
             size="sm"
             variant="ghost"
-            className="shrink-0 whitespace-nowrap px-2 text-muted-foreground/70 hover:text-foreground/80 sm:px-3"
+            className={COMPOSER_TOOLBAR_TRIGGER_CLASSNAME}
           />
         }
       >

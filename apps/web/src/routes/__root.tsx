@@ -22,6 +22,9 @@ import { terminalRunningSubprocessFromEvent } from "../terminalActivity";
 import { onServerConfigUpdated, onServerWelcome } from "../wsNativeApi";
 import { providerQueryKeys } from "../lib/providerReactQuery";
 import { collectActiveTerminalThreadIds } from "../lib/terminalStateCleanup";
+import { isElectron } from "../env";
+import { readDesktopBridge } from "../desktopBridge";
+import { collectDesktopThreadNotificationEvents } from "../desktopThreadNotifications";
 
 export const Route = createRootRouteWithContext<{
   queryClient: QueryClient;
@@ -51,6 +54,7 @@ function RootRouteView() {
       <AnchoredToastProvider>
         <EventRouter />
         <DesktopProjectBootstrap />
+        <DesktopThreadNotifications />
         <Outlet />
       </AnchoredToastProvider>
     </ToastProvider>
@@ -298,5 +302,52 @@ function EventRouter() {
 
 function DesktopProjectBootstrap() {
   // Desktop hydration runs through EventRouter project + orchestration sync.
+  return null;
+}
+
+function DesktopThreadNotifications() {
+  const threads = useStore((store) => store.threads);
+  const projects = useStore((store) => store.projects);
+  const previousThreadsRef = useRef(threads);
+  const initializedRef = useRef(false);
+
+  useEffect(() => {
+    if (!isElectron) {
+      previousThreadsRef.current = threads;
+      return;
+    }
+
+    if (!initializedRef.current) {
+      initializedRef.current = true;
+      previousThreadsRef.current = threads;
+      return;
+    }
+
+    if (document.visibilityState === "visible" && document.hasFocus()) {
+      previousThreadsRef.current = threads;
+      return;
+    }
+
+    const bridge = readDesktopBridge();
+    if (!bridge || typeof bridge.showNotification !== "function") {
+      previousThreadsRef.current = threads;
+      return;
+    }
+
+    const events = collectDesktopThreadNotificationEvents({
+      previousThreads: previousThreadsRef.current,
+      nextThreads: threads,
+      projects,
+    });
+    previousThreadsRef.current = threads;
+
+    for (const event of events) {
+      void bridge.showNotification({
+        title: event.title,
+        body: event.body,
+      });
+    }
+  }, [projects, threads]);
+
   return null;
 }

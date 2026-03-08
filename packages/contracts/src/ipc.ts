@@ -49,6 +49,53 @@ export interface ContextMenuItem<T extends string = string> {
   destructive?: boolean;
 }
 
+export interface DesktopNotificationInput {
+  title: string;
+  body?: string;
+}
+
+export type DesktopProviderDiagnosticStatus = "ready" | "warning" | "error";
+
+export interface DesktopProviderDiagnostic {
+  provider: "codex" | "claudeCode" | "cursor";
+  binaryPath: string;
+  status: DesktopProviderDiagnosticStatus;
+  available: boolean;
+  authStatus: "authenticated" | "unauthenticated" | "unknown";
+  version: string | null;
+  message: string | null;
+}
+
+export interface DesktopEnvironmentReportInput {
+  codexBinaryPath?: string | null;
+}
+
+export interface DesktopEnvironmentReport {
+  checkedAt: string;
+  appVersion: string;
+  electronVersion: string;
+  platform: string;
+  arch: string;
+  shell: string | null;
+  stateDirectory: string;
+  logDirectory: string;
+  pathEntries: string[];
+  providerDiagnostics: DesktopProviderDiagnostic[];
+}
+
+export type DesktopBackendRuntimeStatus = "starting" | "running" | "restarting" | "stopped";
+
+export interface DesktopBackendRuntimeState {
+  status: DesktopBackendRuntimeStatus;
+  restartAttempt: number;
+  lastStartedAt: string | null;
+  lastExitedAt: string | null;
+  lastExitReason: string | null;
+  nextRestartAt: string | null;
+  stateDirectory: string;
+  logDirectory: string;
+}
+
 export type DesktopUpdateStatus =
   | "disabled"
   | "idle"
@@ -92,6 +139,14 @@ export interface DesktopBridge {
   downloadUpdate: () => Promise<DesktopUpdateActionResult>;
   installUpdate: () => Promise<DesktopUpdateActionResult>;
   onUpdateState: (listener: (state: DesktopUpdateState) => void) => () => void;
+  getEnvironmentReport: (
+    input?: DesktopEnvironmentReportInput,
+  ) => Promise<DesktopEnvironmentReport>;
+  getBackendRuntimeState: () => Promise<DesktopBackendRuntimeState>;
+  restartBackend: () => Promise<boolean>;
+  openLogDirectory: () => Promise<boolean>;
+  showNotification: (input: DesktopNotificationInput) => Promise<boolean>;
+  onBackendRuntimeState: (listener: (state: DesktopBackendRuntimeState) => void) => () => void;
 }
 
 export interface NativeApi {

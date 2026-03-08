@@ -4,10 +4,16 @@ import * as FS from "node:fs";
 import * as OS from "node:os";
 import * as Path from "node:path";
 
-import { app, BrowserWindow, dialog, ipcMain, Menu, nativeImage, protocol, shell } from "electron";
+import { app, BrowserWindow, dialog, ipcMain, Menu, nativeImage, Notification, protocol, shell } from "electron";
 import type { MenuItemConstructorOptions } from "electron";
 import * as Effect from "effect/Effect";
-import type { DesktopUpdateActionResult, DesktopUpdateState } from "@t3tools/contracts";
+import type {
+  DesktopBackendRuntimeState,
+  DesktopEnvironmentReportInput,
+  DesktopNotificationInput,
+  DesktopUpdateActionResult,
+  DesktopUpdateState,
+} from "@t3tools/contracts";
 import { autoUpdater } from "electron-updater";
 
 import type { ContextMenuItem } from "@t3tools/contracts";
@@ -19,6 +25,7 @@ import {
   getAutoUpdateDisabledReason,
   shouldBroadcastDownloadProgress,
 } from "./updateState";
+import { collectDesktopEnvironmentReport } from "./environmentDoctor";
 import {
   createInitialDesktopUpdateState,
   reduceDesktopUpdateStateOnCheckFailure,
@@ -43,6 +50,12 @@ const UPDATE_STATE_CHANNEL = "desktop:update-state";
 const UPDATE_GET_STATE_CHANNEL = "desktop:update-get-state";
 const UPDATE_DOWNLOAD_CHANNEL = "desktop:update-download";
 const UPDATE_INSTALL_CHANNEL = "desktop:update-install";
+const ENVIRONMENT_REPORT_CHANNEL = "desktop:environment-report";
+const BACKEND_RUNTIME_STATE_CHANNEL = "desktop:backend-runtime-state";
+const BACKEND_RUNTIME_GET_STATE_CHANNEL = "desktop:backend-runtime-get-state";
+const BACKEND_RESTART_CHANNEL = "desktop:backend-restart";
+const OPEN_LOG_DIRECTORY_CHANNEL = "desktop:open-log-directory";
+const SHOW_NOTIFICATION_CHANNEL = "desktop:show-notification";
 const STATE_DIR =
   process.env.T3CODE_STATE_DIR?.trim() || Path.join(OS.homedir(), ".t3", "userdata");
 const DESKTOP_SCHEME = "t3";
@@ -229,6 +242,21 @@ let updateCheckInFlight = false;
 let updateDownloadInFlight = false;
 let updaterConfigured = false;
 let updateState: DesktopUpdateState = initialUpdateState();
+
+function createInitialBackendRuntimeState(): DesktopBackendRuntimeState {
+  return {
+    status: "starting",
+    restartAttempt: 0,
+    lastStartedAt: null,
+    lastExitedAt: null,
+    lastExitReason: null,
+    nextRestartAt: null,
+    stateDirectory: STATE_DIR,
+    logDirectory: LOG_DIR,
+  };
+}
+
+let backendRuntimeState: DesktopBackendRuntimeState = createInitialBackendRuntimeState();
 
 function resolveUpdaterErrorContext(): DesktopUpdateErrorContext {
   if (updateDownloadInFlight) return "download";
@@ -618,6 +646,53 @@ function setUpdateState(patch: Partial<DesktopUpdateState>): void {
   emitUpdateState();
 }
 
+function emitBackendRuntimeState(): void {
+  for (const window of BrowserWindow.getAllWindows()) {
+    if (window.isDestroyed()) continue;
+    window.webContents.send(BACKEND_RUNTIME_STATE_CHANNEL, backendRuntimeState);
+  }
+}
+
+function setBackendRuntimeState(patch: Partial<DesktopBackendRuntimeState>): void {
+  backendRuntimeState = { ...backendRuntimeState, ...patch };
+  emitBackendRuntimeState();
+}
+
+function appIsForeground(): boolean {
+  const window = BrowserWindow.getFocusedWindow() ?? mainWindow;
+  return window !== null && !window.isDestroyed() && window.isVisible() && window.isFocused();
+}
+
+function showNativeNotification(input: DesktopNotificationInput): boolean {
+  if (!Notification.isSupported()) {
+    return false;
+  }
+
+  const title = input.title.trim();
+  const body = input.body?.trim() ?? "";
+  if (title.length === 0) {
+    return false;
+  }
+
+  const notification = new Notification({
+    title,
+    ...(body.length > 0 ? { body } : {}),
+    silent: true,
+  });
+
+  notification.on("click", () => {
+    const window = mainWindow ?? BrowserWindow.getAllWindows()[0] ?? null;
+    if (!window || window.isDestroyed()) return;
+    if (!window.isVisible()) {
+      window.show();
+    }
+    window.focus();
+  });
+
+  notification.show();
+  return true;
+}
+
 function shouldEnableAutoUpdates(): boolean {
   return (
     getAutoUpdateDisabledReason({
@@ -777,6 +852,12 @@ function configureAutoUpdater(): void {
   autoUpdater.on("update-downloaded", (info) => {
     setUpdateState(reduceDesktopUpdateStateOnDownloadComplete(updateState, info.version));
     console.info(`[desktop-updater] Update downloaded: ${info.version}`);
+    if (!appIsForeground()) {
+      showNativeNotification({
+        title: "Update ready to install",
+        body: `OSSCode ${info.version} has been downloaded.`,
+      });
+    }
   });
 
   clearUpdatePollTimer();
@@ -809,15 +890,36 @@ function scheduleBackendRestart(reason: string): void {
   const delayMs = Math.min(500 * 2 ** restartAttempt, 10_000);
   restartAttempt += 1;
   console.error(`[desktop] backend exited unexpectedly (${reason}); restarting in ${delayMs}ms`);
+  const nextRestartAt = new Date(Date.now() + delayMs).toISOString();
+  setBackendRuntimeState({
+    status: "restarting",
+    restartAttempt,
+    lastExitedAt: new Date().toISOString(),
+    lastExitReason: reason,
+    nextRestartAt,
+  });
+  if (!appIsForeground()) {
+    showNativeNotification({
+      title: "OSSCode reconnecting",
+      body: "The local backend stopped and is being restarted.",
+    });
+  }
 
   restartTimer = setTimeout(() => {
     restartTimer = null;
     startBackend();
   }, delayMs);
+  restartTimer.unref();
 }
 
 function startBackend(): void {
   if (isQuitting || backendProcess) return;
+  const recoveredFromFailure =
+    backendRuntimeState.status === "restarting" || backendRuntimeState.lastExitReason !== null;
+  setBackendRuntimeState({
+    status: "starting",
+    nextRestartAt: null,
+  });
 
   const backendEntry = resolveBackendEntry();
   if (!FS.existsSync(backendEntry)) {
@@ -851,6 +953,18 @@ function startBackend(): void {
 
   child.once("spawn", () => {
     restartAttempt = 0;
+    setBackendRuntimeState({
+      status: "running",
+      restartAttempt: 0,
+      lastStartedAt: new Date().toISOString(),
+      nextRestartAt: null,
+    });
+    if (recoveredFromFailure && !appIsForeground()) {
+      showNativeNotification({
+        title: "OSSCode reconnected",
+        body: "The local backend is running again.",
+      });
+    }
   });
 
   child.on("error", (error) => {
@@ -868,7 +982,15 @@ function startBackend(): void {
     closeBackendSession(
       `pid=${child.pid ?? "unknown"} code=${code ?? "null"} signal=${signal ?? "null"}`,
     );
-    if (isQuitting) return;
+    if (isQuitting) {
+      setBackendRuntimeState({
+        status: "stopped",
+        lastExitedAt: new Date().toISOString(),
+        lastExitReason: `code=${code ?? "null"} signal=${signal ?? "null"}`,
+        nextRestartAt: null,
+      });
+      return;
+    }
     const reason = `code=${code ?? "null"} signal=${signal ?? "null"}`;
     scheduleBackendRestart(reason);
   });
@@ -882,7 +1004,13 @@ function stopBackend(): void {
 
   const child = backendProcess;
   backendProcess = null;
-  if (!child) return;
+  if (!child) {
+    setBackendRuntimeState({
+      status: "stopped",
+      nextRestartAt: null,
+    });
+    return;
+  }
 
   if (child.exitCode === null && child.signalCode === null) {
     child.kill("SIGTERM");
@@ -892,6 +1020,11 @@ function stopBackend(): void {
       }
     }, 2_000).unref();
   }
+  setBackendRuntimeState({
+    status: "stopped",
+    lastExitedAt: new Date().toISOString(),
+    nextRestartAt: null,
+  });
 }
 
 async function stopBackendAndWaitForExit(timeoutMs = 5_000): Promise<void> {
@@ -942,6 +1075,11 @@ async function stopBackendAndWaitForExit(timeoutMs = 5_000): Promise<void> {
       settle();
     }, timeoutMs);
     exitTimeoutTimer.unref();
+  });
+  setBackendRuntimeState({
+    status: "stopped",
+    lastExitedAt: new Date().toISOString(),
+    nextRestartAt: null,
   });
 }
 
@@ -1056,6 +1194,64 @@ function registerIpcHandlers(): void {
     }
   });
 
+  ipcMain.removeHandler(ENVIRONMENT_REPORT_CHANNEL);
+  ipcMain.handle(ENVIRONMENT_REPORT_CHANNEL, async (_event, input: unknown) => {
+    const reportInput =
+      input && typeof input === "object" ? (input as DesktopEnvironmentReportInput) : null;
+    return collectDesktopEnvironmentReport({
+      appVersion: app.getVersion(),
+      electronVersion: process.versions.electron ?? "unknown",
+      stateDirectory: STATE_DIR,
+      logDirectory: LOG_DIR,
+      ...(reportInput ? { reportInput } : {}),
+    });
+  });
+
+  ipcMain.removeHandler(BACKEND_RUNTIME_GET_STATE_CHANNEL);
+  ipcMain.handle(BACKEND_RUNTIME_GET_STATE_CHANNEL, async () => backendRuntimeState);
+
+  ipcMain.removeHandler(BACKEND_RESTART_CHANNEL);
+  ipcMain.handle(BACKEND_RESTART_CHANNEL, async () => {
+    if (isQuitting) {
+      return false;
+    }
+    try {
+      await stopBackendAndWaitForExit();
+      setBackendRuntimeState({
+        status: "starting",
+        lastExitReason: null,
+        nextRestartAt: null,
+      });
+      startBackend();
+      return true;
+    } catch {
+      return false;
+    }
+  });
+
+  ipcMain.removeHandler(OPEN_LOG_DIRECTORY_CHANNEL);
+  ipcMain.handle(OPEN_LOG_DIRECTORY_CHANNEL, async () => {
+    try {
+      FS.mkdirSync(LOG_DIR, { recursive: true });
+      const error = await shell.openPath(LOG_DIR);
+      return error.length === 0;
+    } catch {
+      return false;
+    }
+  });
+
+  ipcMain.removeHandler(SHOW_NOTIFICATION_CHANNEL);
+  ipcMain.handle(SHOW_NOTIFICATION_CHANNEL, async (_event, input: unknown) => {
+    if (!input || typeof input !== "object") {
+      return false;
+    }
+    const notificationInput = input as DesktopNotificationInput;
+    if (typeof notificationInput.title !== "string") {
+      return false;
+    }
+    return showNativeNotification(notificationInput);
+  });
+
   ipcMain.removeHandler(UPDATE_GET_STATE_CHANNEL);
   ipcMain.handle(UPDATE_GET_STATE_CHANNEL, async () => updateState);
 
@@ -1122,6 +1318,7 @@ function createWindow(): BrowserWindow {
   window.webContents.on("did-finish-load", () => {
     window.setTitle(APP_DISPLAY_NAME);
     emitUpdateState();
+    emitBackendRuntimeState();
   });
   window.once("ready-to-show", () => {
     window.show();

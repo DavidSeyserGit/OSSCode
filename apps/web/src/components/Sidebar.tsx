@@ -9,6 +9,7 @@ import {
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   DEFAULT_RUNTIME_MODE,
+  type DesktopBackendRuntimeState,
   DEFAULT_MODEL_BY_PROVIDER,
   type DesktopUpdateState,
   ProjectId,
@@ -20,12 +21,11 @@ import { useMutation, useQueries, useQuery, useQueryClient } from "@tanstack/rea
 import { useNavigate, useParams } from "@tanstack/react-router";
 import { useAppSettings } from "../appSettings";
 import { isElectron } from "../env";
-import { APP_BASE_NAME, APP_STAGE_LABEL } from "../branding";
+import { APP_BASE_NAME, APP_DEV_VERSION_LABEL, APP_STAGE_LABEL } from "../branding";
 import { newCommandId, newProjectId, newThreadId } from "../lib/utils";
 import { useStore } from "../store";
 import { isChatNewLocalShortcut, isChatNewShortcut, shortcutLabelForCommand } from "../keybindings";
 import { type Thread } from "../types";
-import { derivePendingApprovals } from "../session-logic";
 import { gitRemoveWorktreeMutationOptions, gitStatusQueryOptions } from "../lib/gitReactQuery";
 import { serverConfigQueryOptions } from "../lib/serverReactQuery";
 import { readNativeApi } from "../nativeApi";
@@ -60,6 +60,13 @@ import {
 } from "./ui/sidebar";
 import { formatWorktreePathForDisplay, getOrphanedWorktreePathForThread } from "../worktreeCleanup";
 import { isNonEmpty as isNonEmptyString } from "effect/String";
+import { readDesktopBridge } from "../desktopBridge";
+import {
+  persistDesktopRecentProjects,
+  readDesktopRecentProjects,
+  type DesktopRecentProject,
+} from "../desktopRecentProjects";
+import { threadHasPendingApprovals, threadHasUnseenCompletion } from "../threadStatus";
 
 const EMPTY_KEYBINDINGS: ResolvedKeybindingsConfig = [];
 const THREAD_PREVIEW_LIMIT = 6;
@@ -103,17 +110,6 @@ interface PrStatusIndicator {
 
 type ThreadPr = GitStatusResult["pr"];
 
-function hasUnseenCompletion(thread: Thread): boolean {
-  if (!thread.latestTurn?.completedAt) return false;
-  const completedAt = Date.parse(thread.latestTurn.completedAt);
-  if (Number.isNaN(completedAt)) return false;
-  if (!thread.lastVisitedAt) return true;
-
-  const lastVisitedAt = Date.parse(thread.lastVisitedAt);
-  if (Number.isNaN(lastVisitedAt)) return true;
-  return completedAt > lastVisitedAt;
-}
-
 function threadStatusPill(thread: Thread, hasPendingApprovals: boolean): ThreadStatusPill | null {
   if (hasPendingApprovals) {
     return {
@@ -142,7 +138,7 @@ function threadStatusPill(thread: Thread, hasPendingApprovals: boolean): ThreadS
     };
   }
 
-  if (hasUnseenCompletion(thread)) {
+  if (threadHasUnseenCompletion(thread)) {
     return {
       label: "Completed",
       colorClass: "text-emerald-600 dark:text-emerald-300/90",
@@ -286,10 +282,16 @@ export default function Sidebar() {
   const renamingCommittedRef = useRef(false);
   const renamingInputRef = useRef<HTMLInputElement | null>(null);
   const [desktopUpdateState, setDesktopUpdateState] = useState<DesktopUpdateState | null>(null);
+  const [backendRuntimeState, setBackendRuntimeState] = useState<DesktopBackendRuntimeState | null>(
+    null,
+  );
+  const [recentProjects, setRecentProjects] = useState<DesktopRecentProject[]>(() =>
+    isElectron ? readDesktopRecentProjects() : [],
+  );
   const pendingApprovalByThreadId = useMemo(() => {
     const map = new Map<ThreadId, boolean>();
     for (const thread of threads) {
-      map.set(thread.id, derivePendingApprovals(thread.activities).length > 0);
+      map.set(thread.id, threadHasPendingApprovals(thread));
     }
     return map;
   }, [threads]);
@@ -825,7 +827,12 @@ export default function Sidebar() {
 
   useEffect(() => {
     if (!isElectron) return;
-    const bridge = window.desktopBridge;
+    setRecentProjects(persistDesktopRecentProjects(projects));
+  }, [projects]);
+
+  useEffect(() => {
+    if (!isElectron) return;
+    const bridge = readDesktopBridge();
     if (
       !bridge ||
       typeof bridge.getUpdateState !== "function" ||
@@ -847,6 +854,39 @@ export default function Sidebar() {
       .then((nextState) => {
         if (disposed || receivedSubscriptionUpdate) return;
         setDesktopUpdateState(nextState);
+      })
+      .catch(() => undefined);
+
+    return () => {
+      disposed = true;
+      unsubscribe();
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!isElectron) return;
+    const bridge = readDesktopBridge();
+    if (
+      !bridge ||
+      typeof bridge.getBackendRuntimeState !== "function" ||
+      typeof bridge.onBackendRuntimeState !== "function"
+    ) {
+      return;
+    }
+
+    let disposed = false;
+    let receivedSubscriptionUpdate = false;
+    const unsubscribe = bridge.onBackendRuntimeState((nextState) => {
+      if (disposed) return;
+      receivedSubscriptionUpdate = true;
+      setBackendRuntimeState(nextState);
+    });
+
+    void bridge
+      .getBackendRuntimeState()
+      .then((nextState) => {
+        if (disposed || receivedSubscriptionUpdate) return;
+        setBackendRuntimeState(nextState);
       })
       .catch(() => undefined);
 
@@ -885,7 +925,7 @@ export default function Sidebar() {
   );
 
   const handleDesktopUpdateButtonClick = useCallback(() => {
-    const bridge = window.desktopBridge;
+    const bridge = readDesktopBridge();
     if (!bridge || !desktopUpdateState) return;
     if (desktopUpdateButtonDisabled || desktopUpdateButtonAction === "none") return;
 
@@ -942,6 +982,41 @@ export default function Sidebar() {
     }
   }, [desktopUpdateButtonAction, desktopUpdateButtonDisabled, desktopUpdateState]);
 
+  const handleOpenDesktopLogs = useCallback(() => {
+    const bridge = readDesktopBridge();
+    if (!bridge) return;
+
+    void bridge.openLogDirectory().then((opened) => {
+      if (opened) return;
+      toastManager.add({
+        type: "error",
+        title: "Unable to open logs",
+        description: "The desktop log directory could not be opened.",
+      });
+    });
+  }, []);
+
+  const handleRestartDesktopBackend = useCallback(() => {
+    const bridge = readDesktopBridge();
+    if (!bridge) return;
+
+    void bridge.restartBackend().then((restarted) => {
+      if (restarted) {
+        toastManager.add({
+          type: "success",
+          title: "Local backend restarting",
+          description: "The desktop app is reconnecting to its local server.",
+        });
+        return;
+      }
+      toastManager.add({
+        type: "error",
+        title: "Unable to restart backend",
+        description: "Try reopening the app or checking the desktop logs.",
+      });
+    });
+  }, []);
+
   const expandThreadListForProject = useCallback((projectId: ProjectId) => {
     setExpandedThreadListsByProject((current) => {
       if (current.has(projectId)) return current;
@@ -970,6 +1045,11 @@ export default function Sidebar() {
         <span className="rounded-full bg-muted/50 px-1.5 py-0.5 text-[8px] font-medium uppercase tracking-[0.18em] text-muted-foreground/60">
           {APP_STAGE_LABEL}
         </span>
+        {APP_DEV_VERSION_LABEL ? (
+          <span className="rounded-full border border-border/60 bg-background/70 px-1.5 py-0.5 font-mono text-[9px] font-medium tracking-tight text-muted-foreground/75">
+            {APP_DEV_VERSION_LABEL}
+          </span>
+        ) : null}
       </div>
     </div>
   );
@@ -1000,6 +1080,33 @@ export default function Sidebar() {
               </Tooltip>
             )}
           </SidebarHeader>
+          {backendRuntimeState && backendRuntimeState.status !== "running" ? (
+            <div className="border-b border-border/70 bg-amber-500/8 px-4 py-2 text-[11px] text-muted-foreground">
+              <div className="flex items-center justify-between gap-3">
+                <span>
+                  {backendRuntimeState.status === "restarting"
+                    ? "Reconnecting local backend..."
+                    : "Starting local backend..."}
+                </span>
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    className="text-foreground/80 underline underline-offset-2"
+                    onClick={handleOpenDesktopLogs}
+                  >
+                    Logs
+                  </button>
+                  <button
+                    type="button"
+                    className="text-foreground/80 underline underline-offset-2"
+                    onClick={handleRestartDesktopBackend}
+                  >
+                    Restart
+                  </button>
+                </div>
+              </div>
+            </div>
+          ) : null}
         </>
       ) : (
         <SidebarHeader className="gap-3 px-3 py-2 sm:gap-2.5 sm:px-4 sm:py-3">
@@ -1307,6 +1414,29 @@ export default function Sidebar() {
                 {isPickingFolder ? "Picking folder..." : "Browse for folder"}
               </button>
             )}
+            {isElectron && recentProjects.length > 0 ? (
+              <div className="mb-2 space-y-1.5">
+                <p className="text-[10px] font-medium uppercase tracking-wider text-muted-foreground/70">
+                  Recent
+                </p>
+                <div className="space-y-1">
+                  {recentProjects.map((project) => (
+                    <button
+                      key={project.cwd}
+                      type="button"
+                      className="flex w-full items-center justify-between rounded-md border border-border bg-background px-2 py-1.5 text-left text-[11px] transition-colors hover:bg-secondary"
+                      onClick={() => void addProjectFromPath(project.cwd)}
+                      disabled={isAddingProject}
+                    >
+                      <span className="min-w-0 truncate text-foreground">{project.name}</span>
+                      <span className="ml-2 truncate text-muted-foreground/70">
+                        {project.cwd}
+                      </span>
+                    </button>
+                  ))}
+                </div>
+              </div>
+            ) : null}
             <div className="flex gap-2">
               <button
                 type="button"
