@@ -87,6 +87,20 @@ export const ProviderSendTurnInput = Schema.Struct({
 });
 export type ProviderSendTurnInput = typeof ProviderSendTurnInput.Type;
 
+export const ProviderAvailableModel = Schema.Struct({
+  slug: TrimmedNonEmptyStringSchema,
+  name: TrimmedNonEmptyStringSchema,
+});
+export type ProviderAvailableModel = typeof ProviderAvailableModel.Type;
+
+export const ProviderGetModelsInput = Schema.Struct({
+  provider: ProviderKind,
+});
+export type ProviderGetModelsInput = typeof ProviderGetModelsInput.Type;
+
+export const ProviderGetModelsResult = Schema.Array(ProviderAvailableModel);
+export type ProviderGetModelsResult = typeof ProviderGetModelsResult.Type;
+
 export const ProviderTurnStartResult = Schema.Struct({
   threadId: ThreadId,
   turnId: TurnId,

@@ -35,6 +35,7 @@ import {
   supportsReasoningEffortForModel,
 } from "@t3tools/shared/model";
 import {
+  type ReactElement,
   memo,
   useCallback,
   useEffect,
@@ -53,6 +54,7 @@ import {
   useVirtualizer,
 } from "@tanstack/react-virtual";
 import { gitBranchesQueryOptions, gitCreateWorktreeMutationOptions } from "~/lib/gitReactQuery";
+import { providerModelsQueryOptions } from "~/lib/providerReactQuery";
 import { projectSearchEntriesQueryOptions } from "~/lib/projectReactQuery";
 import { serverConfigQueryOptions, serverQueryKeys } from "~/lib/serverReactQuery";
 
@@ -158,6 +160,7 @@ import { Group, GroupSeparator } from "./ui/group";
 import {
   Menu,
   MenuGroup,
+  MenuGroupLabel,
   MenuItem,
   MenuPopup,
   MenuRadioGroup,
@@ -207,6 +210,7 @@ import { SidebarTrigger } from "./ui/sidebar";
 import { newCommandId, newMessageId, newThreadId } from "~/lib/utils";
 import { readNativeApi } from "~/nativeApi";
 import {
+  buildAppModelOptions,
   getAppModelOptions,
   resolveAppModelSelection,
   resolveAppServiceTier,
@@ -829,6 +833,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
     ? (sessionProvider ?? selectedProviderByThreadId ?? null)
     : null;
   const selectedProvider: ProviderKind = lockedProvider ?? selectedProviderByThreadId ?? "codex";
+  const cursorModelsQuery = useQuery(providerModelsQueryOptions("cursor"));
   const baseThreadModel = resolveModelSlugForProvider(
     selectedProvider,
     activeThread?.model ?? activeProject?.model ?? getDefaultModel(selectedProvider),
@@ -837,8 +842,9 @@ export default function ChatView({ threadId }: ChatViewProps) {
     () => ({
       codex: settings.customCodexModels,
       claudeCode: settings.customClaudeCodeModels,
+      cursor: settings.customCursorModels,
     }),
-    [settings.customClaudeCodeModels, settings.customCodexModels],
+    [settings.customClaudeCodeModels, settings.customCodexModels, settings.customCursorModels],
   );
   const customModelsForSelectedProvider = customModelsByProvider[selectedProvider];
   const selectedModel = useMemo(() => {
@@ -891,9 +897,10 @@ export default function ChatView({ threadId }: ChatViewProps) {
     supportsReasoningEffort,
   ]);
   const selectedModelForPicker = selectedModel;
+  const cursorModelOptions = cursorModelsQuery.data ?? getAppModelOptions("cursor", []);
   const modelOptionsByProvider = useMemo(
-    () => getCustomModelOptionsByProvider(settings),
-    [settings],
+    () => getCustomModelOptionsByProvider(settings, cursorModelOptions),
+    [cursorModelOptions, settings],
   );
   const selectedModelForPickerWithCustomFallback = useMemo(() => {
     const currentOptions = modelOptionsByProvider[selectedProvider];
@@ -5564,7 +5571,7 @@ function isAvailableProviderOption(option: (typeof PROVIDER_OPTIONS)[number]): o
   label: string;
   available: true;
 } {
-  return option.available && option.value !== "cursor";
+  return option.available;
 }
 
 const AVAILABLE_PROVIDER_OPTIONS = PROVIDER_OPTIONS.filter(isAvailableProviderOption);
@@ -5577,10 +5584,16 @@ const COMING_SOON_PROVIDER_OPTIONS = [
 function getCustomModelOptionsByProvider(settings: {
   customCodexModels: readonly string[];
   customClaudeCodeModels: readonly string[];
-}): Record<ProviderKind, ReadonlyArray<{ slug: string; name: string }>> {
+  customCursorModels: readonly string[];
+}, cursorModelOptions: ReadonlyArray<{ slug: string; name: string }>): Record<ProviderKind, ReadonlyArray<{ slug: string; name: string }>> {
   return {
     codex: getAppModelOptions("codex", settings.customCodexModels),
     claudeCode: getAppModelOptions("claudeCode", settings.customClaudeCodeModels),
+    cursor: buildAppModelOptions({
+      provider: "cursor",
+      baseOptions: cursorModelOptions,
+      customModels: settings.customCursorModels,
+    }),
   };
 }
 
@@ -5623,6 +5636,92 @@ function resolveModelForProviderPicker(
   return null;
 }
 
+function getCursorModelVendorLabel(model: { slug: string; name: string }): string {
+  const slug = model.slug.toLowerCase();
+  const name = model.name.toLowerCase();
+
+  if (slug === "auto" || slug.startsWith("composer-")) {
+    return "Cursor";
+  }
+  if (slug.startsWith("gpt-") || name.startsWith("gpt-")) {
+    return "OpenAI";
+  }
+  if (
+    slug.startsWith("sonnet") ||
+    slug.startsWith("opus") ||
+    name.includes("claude") ||
+    name.includes("sonnet") ||
+    name.includes("opus")
+  ) {
+    return "Anthropic";
+  }
+  if (slug.startsWith("gemini") || name.includes("gemini")) {
+    return "Google";
+  }
+  if (slug.startsWith("grok") || name.includes("grok")) {
+    return "xAI";
+  }
+  if (slug.startsWith("kimi") || name.includes("kimi")) {
+    return "Moonshot";
+  }
+
+  return "Other";
+}
+
+function groupCursorModelOptions(
+  options: ReadonlyArray<{ slug: string; name: string }>,
+): Array<{ label: string; options: Array<{ slug: string; name: string }> }> {
+  const order = ["Cursor", "OpenAI", "Anthropic", "Google", "xAI", "Moonshot", "Other"] as const;
+  const groups = new Map<string, Array<{ slug: string; name: string }>>();
+
+  for (const option of options) {
+    const label = getCursorModelVendorLabel(option);
+    const existing = groups.get(label);
+    if (existing) {
+      existing.push(option);
+    } else {
+      groups.set(label, [option]);
+    }
+  }
+
+  return order.flatMap((label) => {
+    const groupedOptions = groups.get(label);
+    return groupedOptions && groupedOptions.length > 0
+      ? [{ label, options: groupedOptions }]
+      : [];
+  });
+}
+
+function renderCursorModelMenuGroups(input: {
+  groups: ReadonlyArray<{ label: string; options: ReadonlyArray<{ slug: string; name: string }> }>;
+  provider: ProviderKind;
+  onSelect: () => void;
+}): ReactElement[] {
+  const elements: ReactElement[] = [];
+
+  for (const [index, group] of input.groups.entries()) {
+    if (index > 0) {
+      elements.push(<MenuDivider key={`cursor-divider:${group.label}`} />);
+    }
+    elements.push(
+      <MenuGroup key={`cursor-group:${group.label}`}>
+        <MenuGroupLabel>{group.label}</MenuGroupLabel>
+        {group.options.map((modelOption) => (
+          <MenuRadioItem
+            key={`${input.provider}:${modelOption.slug}`}
+            value={modelOption.slug}
+            onClick={input.onSelect}
+          >
+            {modelOption.name}
+          </MenuRadioItem>
+        ))}
+      </MenuGroup>,
+    );
+  }
+
+  return elements;
+}
+
 const ProviderModelPicker = memo(function ProviderModelPicker(props: {
   provider: ProviderKind;
   model: ModelSlug;
@@ -5634,6 +5733,10 @@ const ProviderModelPicker = memo(function ProviderModelPicker(props: {
 }) {
   const [isMenuOpen, setIsMenuOpen] = useState(false);
   const selectedProviderOptions = props.modelOptionsByProvider[props.provider];
+  const cursorModelGroups = useMemo(
+    () => groupCursorModelOptions(props.modelOptionsByProvider.cursor),
+    [props.modelOptionsByProvider.cursor],
+  );
   const selectedModelLabel =
     selectedProviderOptions.find((option) => option.slug === props.model)?.name ?? props.model;
   const ProviderIcon = PROVIDER_ICON_BY_PROVIDER[props.provider];
@@ -5683,38 +5786,46 @@ const ProviderModelPicker = memo(function ProviderModelPicker(props: {
                 {option.label}
               </MenuSubTrigger>
               <MenuSubPopup className="[--available-height:min(24rem,70vh)]">
-                <MenuGroup>
-                  <MenuRadioGroup
-                    value={props.provider === option.value ? props.model : ""}
-                    onValueChange={(value) => {
-                      if (props.disabled) return;
-                      if (isDisabledByProviderLock) return;
-                      if (!value) return;
-                      const resolvedModel = resolveModelForProviderPicker(
-                        option.value,
-                        value,
-                        props.modelOptionsByProvider[option.value],
-                      );
-                      if (!resolvedModel) return;
-                      props.onProviderModelChange(option.value, resolvedModel);
-                      setIsMenuOpen(false);
+                <MenuRadioGroup
+                  value={props.provider === option.value ? props.model : ""}
+                  onValueChange={(value) => {
+                    if (props.disabled) return;
+                    if (isDisabledByProviderLock) return;
+                    if (!value) return;
+                    const resolvedModel = resolveModelForProviderPicker(
+                      option.value,
+                      value,
+                      props.modelOptionsByProvider[option.value],
+                    );
+                    if (!resolvedModel) return;
+                    props.onProviderModelChange(option.value, resolvedModel);
+                    setIsMenuOpen(false);
                     }}
-                  >
-                    {props.modelOptionsByProvider[option.value].map((modelOption) => (
-                      <MenuRadioItem
-                        key={`${option.value}:${modelOption.slug}`}
-                        value={modelOption.slug}
-                        onClick={() => setIsMenuOpen(false)}
-                      >
-                        {option.value === "codex" &&
-                        shouldShowFastTierIcon(modelOption.slug, props.serviceTierSetting) ? (
-                          <ZapIcon className="size-3.5 shrink-0 text-amber-500" />
-                        ) : null}
-                        {modelOption.name}
-                      </MenuRadioItem>
-                    ))}
-                  </MenuRadioGroup>
-                </MenuGroup>
+                >
+                  {option.value === "cursor"
+                    ? renderCursorModelMenuGroups({
+                        groups: cursorModelGroups,
+                        provider: option.value,
+                        onSelect: () => setIsMenuOpen(false),
+                      })
+                    : (
+                        <MenuGroup>
+                          {props.modelOptionsByProvider[option.value].map((modelOption) => (
+                            <MenuRadioItem
+                              key={`${option.value}:${modelOption.slug}`}
+                              value={modelOption.slug}
+                              onClick={() => setIsMenuOpen(false)}
+                            >
+                              {option.value === "codex" &&
+                              shouldShowFastTierIcon(modelOption.slug, props.serviceTierSetting) ? (
+                                <ZapIcon className="size-3.5 shrink-0 text-amber-500" />
+                              ) : null}
+                              {modelOption.name}
+                            </MenuRadioItem>
+                          ))}
+                        </MenuGroup>
+                      )}
+                </MenuRadioGroup>
               </MenuSubPopup>
             </MenuSub>
           );

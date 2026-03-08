@@ -29,6 +29,7 @@ const MODELS_WITH_FAST_SUPPORT = new Set(["gpt-5.4"]);
 const BUILT_IN_MODEL_SLUGS_BY_PROVIDER: Record<ProviderKind, ReadonlySet<string>> = {
   codex: new Set(getModelOptions("codex").map((option) => option.slug)),
   claudeCode: new Set(getModelOptions("claudeCode").map((option) => option.slug)),
+  cursor: new Set(getModelOptions("cursor").map((option) => option.slug)),
 };
 
 const AppSettingsSchema = Schema.Struct({
@@ -49,12 +50,20 @@ const AppSettingsSchema = Schema.Struct({
   customClaudeCodeModels: Schema.Array(Schema.String).pipe(
     Schema.withConstructorDefault(() => Option.some([])),
   ),
+  customCursorModels: Schema.Array(Schema.String).pipe(
+    Schema.withConstructorDefault(() => Option.some([])),
+  ),
 });
 export type AppSettings = typeof AppSettingsSchema.Type;
 export interface AppModelOption {
   slug: string;
   name: string;
   isCustom: boolean;
+}
+
+interface BaseModelOption {
+  slug: string;
+  name: string;
 }
 
 export function resolveAppServiceTier(serviceTier: AppServiceTier): ProviderServiceTier | null {
@@ -83,6 +92,13 @@ export function normalizeCustomModelSlugs(
   models: Iterable<string | null | undefined>,
   provider: ProviderKind = "codex",
 ): string[] {
+  if (
+    models == null ||
+    (typeof models !== "string" && typeof (models as { [Symbol.iterator]?: unknown })[Symbol.iterator] !== "function")
+  ) {
+    return [];
+  }
+
   const normalizedModels: string[] = [];
   const seen = new Set<string>();
   const builtInModelSlugs = BUILT_IN_MODEL_SLUGS_BY_PROVIDER[provider];
@@ -116,6 +132,7 @@ function normalizeAppSettings(settings: AppSettings): AppSettings {
       settings.customClaudeCodeModels,
       "claudeCode",
     ),
+    customCursorModels: normalizeCustomModelSlugs(settings.customCursorModels, "cursor"),
   };
 }
 
@@ -124,14 +141,28 @@ export function getAppModelOptions(
   customModels: readonly string[],
   selectedModel?: string | null,
 ): AppModelOption[] {
-  const options: AppModelOption[] = getModelOptions(provider).map(({ slug, name }) => ({
+  return buildAppModelOptions({
+    provider,
+    baseOptions: getModelOptions(provider),
+    customModels,
+    selectedModel,
+  });
+}
+
+export function buildAppModelOptions(input: {
+  provider: ProviderKind;
+  baseOptions: ReadonlyArray<BaseModelOption>;
+  customModels: readonly string[];
+  selectedModel?: string | null | undefined;
+}): AppModelOption[] {
+  const options: AppModelOption[] = input.baseOptions.map(({ slug, name }) => ({
     slug,
     name,
     isCustom: false,
   }));
   const seen = new Set(options.map((option) => option.slug));
 
-  for (const slug of normalizeCustomModelSlugs(customModels, provider)) {
+  for (const slug of normalizeCustomModelSlugs(input.customModels, input.provider)) {
     if (seen.has(slug)) {
       continue;
     }
@@ -144,7 +175,7 @@ export function getAppModelOptions(
     });
   }
 
-  const normalizedSelectedModel = normalizeModelSlug(selectedModel, provider);
+  const normalizedSelectedModel = normalizeModelSlug(input.selectedModel, input.provider);
   if (normalizedSelectedModel && !seen.has(normalizedSelectedModel)) {
     options.push({
       slug: normalizedSelectedModel,

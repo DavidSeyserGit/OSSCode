@@ -56,6 +56,18 @@ describe("resolveModelSlug", () => {
       expect(resolveModelSlug(model.slug, "claudeCode")).toBe(model.slug);
     }
   });
+
+  it("preserves dynamic Cursor model slugs", () => {
+    expect(resolveModelSlug("gpt-5", "cursor")).toBe("gpt-5");
+    expect(resolveModelSlug("claude-sonnet-4-5", "cursor")).toBe("claude-sonnet-4-5");
+  });
+
+  it("normalizes legacy Cursor picker labels back to their slug", () => {
+    expect(normalizeModelSlug("gpt-5.3-codex-low-fast - GPT-5.3 Codex Low Fast", "cursor")).toBe(
+      "gpt-5.3-codex-low-fast",
+    );
+  });
+
   it("keeps codex defaults for backward compatibility", () => {
     expect(getDefaultModel()).toBe(DEFAULT_MODEL_BY_PROVIDER.codex);
     expect(getModelOptions()).toEqual(MODEL_OPTIONS_BY_PROVIDER.codex);

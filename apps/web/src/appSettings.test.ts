@@ -22,6 +22,15 @@ describe("normalizeCustomModelSlugs", () => {
       ]),
     ).toEqual(["custom/internal-model"]);
   });
+
+  it("returns an empty list for non-iterable runtime values", () => {
+    expect(
+      normalizeCustomModelSlugs(
+        undefined as unknown as Iterable<string | null | undefined>,
+        "cursor",
+      ),
+    ).toEqual([]);
+  });
 });
 
 describe("getAppModelOptions", () => {
@@ -46,6 +55,12 @@ describe("getAppModelOptions", () => {
       name: "custom/selected-model",
       isCustom: true,
     });
+  });
+
+  it("supports custom cursor models without throwing", () => {
+    const options = getAppModelOptions("cursor", ["cursor/internal-model"]);
+
+    expect(options.some((option) => option.slug === "cursor/internal-model")).toBe(true);
   });
 });
 

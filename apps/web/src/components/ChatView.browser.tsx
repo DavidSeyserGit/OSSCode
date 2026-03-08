@@ -263,6 +263,9 @@ function resolveWsRpc(tag: string): unknown {
   if (tag === WS_METHODS.serverGetConfig) {
     return fixture.serverConfig;
   }
+  if (tag === WS_METHODS.providersGetModels) {
+    return [{ slug: "auto", name: "Auto" }];
+  }
   if (tag === WS_METHODS.gitListBranches) {
     return {
       isRepo: true,

@@ -1,6 +1,7 @@
 import {
   OrchestrationGetFullThreadDiffInput,
   OrchestrationGetTurnDiffInput,
+  type ProviderKind,
   ThreadId,
 } from "@t3tools/contracts";
 import { queryOptions } from "@tanstack/react-query";
@@ -17,6 +18,7 @@ interface CheckpointDiffQueryInput {
 
 export const providerQueryKeys = {
   all: ["providers"] as const,
+  models: (provider: ProviderKind) => ["providers", "models", provider] as const,
   checkpointDiff: (input: CheckpointDiffQueryInput) =>
     [
       "providers",
@@ -27,6 +29,18 @@ export const providerQueryKeys = {
       input.cacheScope ?? null,
     ] as const,
 };
+
+export function providerModelsQueryOptions(provider: ProviderKind) {
+  return queryOptions({
+    queryKey: providerQueryKeys.models(provider),
+    queryFn: async () => {
+      const api = ensureNativeApi();
+      return api.providers.getModels({ provider });
+    },
+    staleTime: 60_000,
+    refetchOnWindowFocus: true,
+  });
+}
 
 function decodeCheckpointDiffRequest(input: CheckpointDiffQueryInput) {
   if (input.fromTurnCount === 0) {

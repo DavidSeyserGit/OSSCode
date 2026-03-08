@@ -44,6 +44,7 @@ export const MODEL_OPTIONS_BY_PROVIDER = {
     { slug: "claude-sonnet-4-6", name: "Claude Sonnet 4.6" },
     { slug: "claude-opus-4-6", name: "Claude Opus 4.6" },
   ],
+  cursor: [{ slug: "auto", name: "Auto" }],
 } as const satisfies Record<ProviderKind, readonly ModelOption[]>;
 export type ModelOptionsByProvider = typeof MODEL_OPTIONS_BY_PROVIDER;
 
@@ -53,6 +54,7 @@ export type ModelSlug = BuiltInModelSlug | (string & {});
 export const DEFAULT_MODEL_BY_PROVIDER = {
   codex: "gpt-5.4",
   claudeCode: "sonnet",
+  cursor: "auto",
 } as const satisfies Record<ProviderKind, ModelSlug>;
 
 export const MODEL_SLUG_ALIASES_BY_PROVIDER = {
@@ -69,14 +71,19 @@ export const MODEL_SLUG_ALIASES_BY_PROVIDER = {
     "sonnet-4.6": "claude-sonnet-4-6",
     "opus-4.6": "claude-opus-4-6",
   },
+  cursor: {
+    auto: "auto",
+  },
 } as const satisfies Record<ProviderKind, Record<string, ModelSlug>>;
 
 export const REASONING_EFFORT_OPTIONS_BY_PROVIDER = {
   codex: CODEX_REASONING_EFFORT_OPTIONS,
   claudeCode: CLAUDE_CODE_REASONING_EFFORT_OPTIONS,
+  cursor: [],
 } as const satisfies Record<ProviderKind, readonly ReasoningEffort[]>;
 
 export const DEFAULT_REASONING_EFFORT_BY_PROVIDER = {
   codex: "high",
   claudeCode: "medium",
+  cursor: null,
 } as const satisfies Record<ProviderKind, ReasoningEffort | null>;

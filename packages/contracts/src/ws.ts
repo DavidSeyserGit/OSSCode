@@ -9,6 +9,7 @@ import {
   OrchestrationGetTurnDiffInput,
   OrchestrationReplayEventsInput,
 } from "./orchestration";
+import { ProviderGetModelsInput } from "./provider";
 import {
   GitCheckoutInput,
   GitCreateBranchInput,
@@ -67,6 +68,9 @@ export const WS_METHODS = {
   // Server meta
   serverGetConfig: "server.getConfig",
   serverUpsertKeybinding: "server.upsertKeybinding",
+
+  // Provider metadata
+  providersGetModels: "providers.getModels",
 } as const;
 
 // ── Push Event Channels ──────────────────────────────────────────────
@@ -129,6 +133,9 @@ const WebSocketRequestBody = Schema.Union([
   // Server meta
   tagRequestBody(WS_METHODS.serverGetConfig, Schema.Struct({})),
   tagRequestBody(WS_METHODS.serverUpsertKeybinding, KeybindingRule),
+
+  // Provider metadata
+  tagRequestBody(WS_METHODS.providersGetModels, ProviderGetModelsInput),
 ]);
 
 export const WebSocketRequest = Schema.Struct({

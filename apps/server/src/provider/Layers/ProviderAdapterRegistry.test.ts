@@ -6,6 +6,7 @@ import { Effect, Layer, Stream } from "effect";
 
 import { ClaudeCodeAdapter, type ClaudeCodeAdapterShape } from "../Services/ClaudeCodeAdapter.ts";
 import { CodexAdapter, CodexAdapterShape } from "../Services/CodexAdapter.ts";
+import { CursorAdapter, type CursorAdapterShape } from "../Services/CursorAdapter.ts";
 import { ProviderAdapterRegistry } from "../Services/ProviderAdapterRegistry.ts";
 import { ProviderAdapterRegistryLive } from "./ProviderAdapterRegistry.ts";
 import { ProviderUnsupportedError } from "../Errors.ts";
@@ -45,11 +46,29 @@ const fakeClaudeCodeAdapter: ClaudeCodeAdapterShape = {
   streamEvents: Stream.empty,
 };
 
+const fakeCursorAdapter: CursorAdapterShape = {
+  provider: "cursor",
+  capabilities: { sessionModelSwitch: "restart-session" },
+  startSession: vi.fn(),
+  sendTurn: vi.fn(),
+  interruptTurn: vi.fn(),
+  respondToRequest: vi.fn(),
+  respondToUserInput: vi.fn(),
+  stopSession: vi.fn(),
+  listSessions: vi.fn(),
+  hasSession: vi.fn(),
+  readThread: vi.fn(),
+  rollbackThread: vi.fn(),
+  stopAll: vi.fn(),
+  streamEvents: Stream.empty,
+};
+
 const layer = it.layer(
   Layer.mergeAll(
     ProviderAdapterRegistryLive.pipe(
       Layer.provideMerge(Layer.succeed(CodexAdapter, fakeCodexAdapter)),
       Layer.provideMerge(Layer.succeed(ClaudeCodeAdapter, fakeClaudeCodeAdapter)),
+      Layer.provideMerge(Layer.succeed(CursorAdapter, fakeCursorAdapter)),
     ),
     NodeServices.layer,
   ),
@@ -63,9 +82,11 @@ layer("ProviderAdapterRegistryLive", (it) => {
       assert.equal(codex, fakeCodexAdapter);
       const claudeCode = yield* registry.getByProvider("claudeCode");
       assert.equal(claudeCode, fakeClaudeCodeAdapter);
+      const cursor = yield* registry.getByProvider("cursor");
+      assert.equal(cursor, fakeCursorAdapter);
 
       const providers = yield* registry.listProviders();
-      assert.deepEqual(providers, ["codex", "claudeCode"]);
+      assert.deepEqual(providers, ["codex", "claudeCode", "cursor"]);
     }),
   );
 
