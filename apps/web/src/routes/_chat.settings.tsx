@@ -54,6 +54,13 @@ const MODEL_PROVIDER_SETTINGS: Array<{
     placeholder: "your-codex-model-slug",
     example: "gpt-6.7-codex-ultra-preview",
   },
+  {
+    provider: "claudeCode",
+    title: "Claude Code",
+    description: "Save additional Claude Code model slugs for the picker and `/model` command.",
+    placeholder: "your-claude-model-slug",
+    example: "claude-sonnet-4-7",
+  },
 ] as const;
 
 function getCustomModelsForProvider(
@@ -62,8 +69,9 @@ function getCustomModelsForProvider(
 ) {
   switch (provider) {
     case "codex":
-    default:
       return settings.customCodexModels;
+    case "claudeCode":
+      return settings.customClaudeCodeModels;
   }
 }
 
@@ -73,16 +81,18 @@ function getDefaultCustomModelsForProvider(
 ) {
   switch (provider) {
     case "codex":
-    default:
       return defaults.customCodexModels;
+    case "claudeCode":
+      return defaults.customClaudeCodeModels;
   }
 }
 
 function patchCustomModels(provider: ProviderKind, models: string[]) {
   switch (provider) {
     case "codex":
-    default:
       return { customCodexModels: models };
+    case "claudeCode":
+      return { customClaudeCodeModels: models };
   }
 }
 
@@ -96,6 +106,7 @@ function SettingsRouteView() {
     Record<ProviderKind, string>
   >({
     codex: "",
+    claudeCode: "",
   });
   const [customModelErrorByProvider, setCustomModelErrorByProvider] = useState<
     Partial<Record<ProviderKind, string | null>>
@@ -203,7 +214,7 @@ function SettingsRouteView() {
               <div className="mb-4">
                 <h2 className="text-sm font-medium text-foreground">Appearance</h2>
                 <p className="mt-1 text-xs text-muted-foreground">
-                  Choose how T3 Code handles light and dark mode.
+                  Choose how OSS Code handles light and dark mode.
                 </p>
               </div>
 

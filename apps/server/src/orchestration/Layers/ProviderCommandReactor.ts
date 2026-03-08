@@ -213,7 +213,9 @@ const make = Effect.gen(function* () {
 
     const desiredRuntimeMode = thread.runtimeMode;
     const currentProvider: ProviderKind | undefined =
-      thread.session?.providerName === "codex" ? thread.session.providerName : undefined;
+      thread.session?.providerName === "codex" || thread.session?.providerName === "claudeCode"
+        ? thread.session.providerName
+        : undefined;
     const preferredProvider: ProviderKind | undefined = options?.provider ?? currentProvider;
     const desiredModel = options?.model ?? thread.model;
     const effectiveCwd = resolveThreadWorkspaceCwd({
@@ -474,7 +476,43 @@ const make = Effect.gen(function* () {
       ...(event.payload.modelOptions !== undefined ? { modelOptions: event.payload.modelOptions } : {}),
       interactionMode: event.payload.interactionMode,
       createdAt: event.payload.createdAt,
-    });
+    }).pipe(
+      Effect.catchCause((cause) =>
+        Effect.gen(function* () {
+          const error = Cause.squash(cause);
+          const detail = toErrorMessage(error);
+          const existingSession = thread.session;
+
+          yield* setThreadSession({
+            threadId: event.payload.threadId,
+            session: {
+              threadId: event.payload.threadId,
+              status:
+                existingSession?.status === "running" && existingSession.activeTurnId !== null
+                  ? "running"
+                  : "error",
+              providerName:
+                existingSession?.providerName ?? event.payload.provider ?? thread.session?.providerName ?? null,
+              runtimeMode: existingSession?.runtimeMode ?? thread.runtimeMode,
+              activeTurnId:
+                existingSession?.status === "running" ? existingSession.activeTurnId : null,
+              lastError: detail,
+              updatedAt: event.payload.createdAt,
+            },
+            createdAt: event.payload.createdAt,
+          });
+
+          yield* appendProviderFailureActivity({
+            threadId: event.payload.threadId,
+            kind: "provider.turn.start.failed",
+            summary: "Provider turn start failed",
+            detail,
+            turnId: null,
+            createdAt: event.payload.createdAt,
+          });
+        }),
+      ),
+    );
   });
 
   const processTurnInterruptRequested = Effect.fnUntraced(function* (

@@ -4100,13 +4100,19 @@ const ProviderHealthBanner = memo(function ProviderHealthBanner({
     status.status === "error"
       ? `${status.provider} provider is unavailable.`
       : `${status.provider} provider has limited availability.`;
+  const providerLabel =
+    status.provider === "codex"
+      ? "Codex"
+      : status.provider === "claudeCode"
+        ? "Claude Code"
+        : status.provider;
 
   return (
     <div className="pt-3 mx-auto max-w-3xl">
       <Alert variant={status.status === "error" ? "error" : "warning"}>
         <CircleAlertIcon />
         <AlertTitle>
-          {status.provider === "codex" ? "Codex provider status" : `${status.provider} status`}
+          {providerLabel} provider status
         </AlertTitle>
         <AlertDescription className="line-clamp-3" title={status.message ?? defaultMessage}>
           {status.message ?? defaultMessage}
@@ -5285,7 +5291,7 @@ function isAvailableProviderOption(option: (typeof PROVIDER_OPTIONS)[number]): o
   label: string;
   available: true;
 } {
-  return option.available && option.value !== "claudeCode";
+  return option.available && option.value !== "cursor";
 }
 
 const AVAILABLE_PROVIDER_OPTIONS = PROVIDER_OPTIONS.filter(isAvailableProviderOption);
@@ -5297,9 +5303,11 @@ const COMING_SOON_PROVIDER_OPTIONS = [
 
 function getCustomModelOptionsByProvider(settings: {
   customCodexModels: readonly string[];
+  customClaudeCodeModels: readonly string[];
 }): Record<ProviderKind, ReadonlyArray<{ slug: string; name: string }>> {
   return {
     codex: getAppModelOptions("codex", settings.customCodexModels),
+    claudeCode: getAppModelOptions("claudeCode", settings.customClaudeCodeModels),
   };
 }
 
