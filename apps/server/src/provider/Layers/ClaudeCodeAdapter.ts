@@ -209,6 +209,7 @@ function buildClaudeArgs(input: {
   readonly prompt: string;
   readonly sessionId: string;
   readonly model?: string;
+  readonly effort?: "low" | "medium" | "high";
   readonly addDirectories?: ReadonlyArray<string>;
   readonly runtimeMode: ProviderSession["runtimeMode"];
   readonly interactionMode?: "default" | "plan";
@@ -232,6 +233,10 @@ function buildClaudeArgs(input: {
 
   if (input.model) {
     args.push("--model", input.model);
+  }
+
+  if (input.effort) {
+    args.push("--effort", input.effort);
   }
 
   const addDirectories = input.addDirectories ?? [];
@@ -448,12 +453,14 @@ export function makeClaudeCodeAdapterLive(options?: ClaudeCodeAdapterLiveOptions
           const turnId = makeTurnId(input.threadId);
           const assistantItemId = makeAssistantItemId(turnId);
           const requestedModel = input.model ?? state.session.model;
+          const requestedEffort = input.modelOptions?.claudeCode?.reasoningEffort;
           const child = spawn(
             binaryPath,
             buildClaudeArgs({
               prompt: promptWithAttachments,
               sessionId: state.providerSessionId,
               ...(requestedModel ? { model: requestedModel } : {}),
+              ...(requestedEffort ? { effort: requestedEffort } : {}),
               ...(addDirectories.length > 0 ? { addDirectories } : {}),
               runtimeMode: state.session.runtimeMode,
               ...(input.interactionMode ? { interactionMode: input.interactionMode } : {}),

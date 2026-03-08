@@ -112,6 +112,11 @@ layer("ClaudeCodeAdapterLive", (it) => {
         threadId: asThreadId("thread-1"),
         input: "Describe the attached UI issue.",
         attachments: [attachment],
+        modelOptions: {
+          claudeCode: {
+            reasoningEffort: "high",
+          },
+        },
       });
 
       yield* Effect.promise(() => waitFor(() => fs.existsSync(capturedArgsPath)));
@@ -129,6 +134,7 @@ layer("ClaudeCodeAdapterLive", (it) => {
       };
       const promptIndex = captured.args.indexOf("-p");
       const addDirIndex = captured.args.indexOf("--add-dir");
+      const effortIndex = captured.args.indexOf("--effort");
       const normalizedCapturedCwd = fs.realpathSync.native(captured.cwd);
       const normalizedWorkspaceDir = fs.realpathSync.native(workspaceDir);
       const normalizedAttachmentDir = fs.realpathSync.native(path.dirname(attachmentPath));
@@ -136,6 +142,8 @@ layer("ClaudeCodeAdapterLive", (it) => {
       assert.equal(normalizedCapturedCwd, normalizedWorkspaceDir);
       assert.notEqual(promptIndex, -1);
       assert.notEqual(addDirIndex, -1);
+      assert.notEqual(effortIndex, -1);
+      assert.equal(captured.args[effortIndex + 1], "high");
       assert.equal(
         fs.realpathSync.native(captured.args[addDirIndex + 1] ?? ""),
         normalizedAttachmentDir,

@@ -71,6 +71,7 @@ import {
   derivePendingApprovals,
   derivePendingUserInputs,
   derivePhase,
+  deriveQueuedTurnReplayAction,
   deriveTimelineEntries,
   deriveActiveWorkStartedAt,
   deriveActivePlanState,
@@ -323,6 +324,12 @@ interface ExpandedImagePreview {
   index: number;
 }
 
+type QueuedComposerMessage = {
+  text: string;
+  images: ComposerImageAttachment[];
+  afterTurnId: TurnId | null;
+};
+
 function buildExpandedImagePreview(
   images: ReadonlyArray<{ id: string; name: string; previewUrl?: string }>,
   selectedImageId: string,
@@ -460,6 +467,17 @@ function cloneComposerImageForRetry(image: ComposerImageAttachment): ComposerIma
   } catch {
     return image;
   }
+}
+
+function queuedMessageSummary(message: Pick<QueuedComposerMessage, "text" | "images">): string {
+  if (message.text) {
+    return message.text;
+  }
+  const imageCount = message.images.length;
+  if (imageCount <= 1) {
+    return "Image";
+  }
+  return `${imageCount} images`;
 }
 
 const VscodeEntryIcon = memo(function VscodeEntryIcon(props: {
@@ -644,6 +662,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
   >({});
   const [sendPhase, setSendPhase] = useState<SendPhase>("idle");
   const [sendStartedAt, setSendStartedAt] = useState<string | null>(null);
+  const [queuedMessage, setQueuedMessage] = useState<QueuedComposerMessage | null>(null);
   const [isConnecting, _setIsConnecting] = useState(false);
   const [isRevertingCheckpoint, setIsRevertingCheckpoint] = useState(false);
   const [queuedFollowUp, setQueuedFollowUp] = useState<{
@@ -698,6 +717,12 @@ export default function ChatView({ threadId }: ChatViewProps) {
   const attachmentPreviewHandoffByMessageIdRef = useRef<Record<string, string[]>>({});
   const attachmentPreviewHandoffTimeoutByMessageIdRef = useRef<Record<string, number>>({});
   const sendInFlightRef = useRef(false);
+  const onSendRef = useRef<
+    (
+      e?: { preventDefault: () => void },
+      override?: { text: string; images: ComposerImageAttachment[] },
+    ) => Promise<void>
+  >(async () => {});
   const dragDepthRef = useRef(0);
   const terminalOpenByThreadRef = useRef<Record<string, boolean>>({});
   const setMessagesScrollContainerRef = useCallback((element: HTMLDivElement | null) => {
@@ -977,6 +1002,29 @@ export default function ChatView({ threadId }: ChatViewProps) {
     isComposerApprovalState ||
     pendingUserInputs.length > 0 ||
     (showPlanFollowUpPrompt && activeProposedPlan !== null);
+  const isQueuedComposerLocked = phase === "running" && queuedMessage !== null;
+  const queuedTurnReplayAction = deriveQueuedTurnReplayAction({
+    queuedAfterTurnId: queuedMessage?.afterTurnId ?? null,
+    phase,
+    latestTurn: activeLatestTurn
+      ? {
+          turnId: activeLatestTurn.turnId,
+          state: activeLatestTurn.state,
+        }
+      : null,
+    latestTurnSettled,
+    session: activeThread?.session
+      ? {
+          status: activeThread.session.status,
+          activeTurnId: activeThread.session.activeTurnId,
+        }
+      : null,
+    isSendBusy,
+    isConnecting,
+    sendInFlight: sendInFlightRef.current,
+    hasPendingApproval: activePendingApproval !== null,
+    hasPendingUserInput: activePendingUserInput !== null,
+  });
   useEffect(() => {
     if (!activePendingProgress) {
       return;
@@ -2310,7 +2358,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
   ]);
 
   const addComposerImages = (files: File[]) => {
-    if (!activeThreadId || files.length === 0) return;
+    if (!activeThreadId || files.length === 0 || isQueuedComposerLocked) return;
 
     const nextImages: ComposerImageAttachment[] = [];
     let nextImageCount = composerImagesRef.current.length;
@@ -2351,10 +2399,14 @@ export default function ChatView({ threadId }: ChatViewProps) {
   };
 
   const removeComposerImage = (imageId: string) => {
+    if (isQueuedComposerLocked) return;
     removeComposerImageFromDraft(imageId);
   };
 
   const onComposerPaste = (event: React.ClipboardEvent<HTMLElement>) => {
+    if (isQueuedComposerLocked) {
+      return;
+    }
     const files = Array.from(event.clipboardData.files);
     if (files.length === 0) {
       return;
@@ -2368,6 +2420,9 @@ export default function ChatView({ threadId }: ChatViewProps) {
   };
 
   const onComposerDragEnter = (event: React.DragEvent<HTMLDivElement>) => {
+    if (isQueuedComposerLocked) {
+      return;
+    }
     if (!event.dataTransfer.types.includes("Files")) {
       return;
     }
@@ -2377,6 +2432,9 @@ export default function ChatView({ threadId }: ChatViewProps) {
   };
 
   const onComposerDragOver = (event: React.DragEvent<HTMLDivElement>) => {
+    if (isQueuedComposerLocked) {
+      return;
+    }
     if (!event.dataTransfer.types.includes("Files")) {
       return;
     }
@@ -2386,6 +2444,9 @@ export default function ChatView({ threadId }: ChatViewProps) {
   };
 
   const onComposerDragLeave = (event: React.DragEvent<HTMLDivElement>) => {
+    if (isQueuedComposerLocked) {
+      return;
+    }
     if (!event.dataTransfer.types.includes("Files")) {
       return;
     }
@@ -2401,6 +2462,9 @@ export default function ChatView({ threadId }: ChatViewProps) {
   };
 
   const onComposerDrop = (event: React.DragEvent<HTMLDivElement>) => {
+    if (isQueuedComposerLocked) {
+      return;
+    }
     if (!event.dataTransfer.types.includes("Files")) {
       return;
     }
@@ -2453,7 +2517,10 @@ export default function ChatView({ threadId }: ChatViewProps) {
     [activeThread, isConnecting, isRevertingCheckpoint, isSendBusy, phase, setThreadError],
   );
 
-  const onSend = async (e?: { preventDefault: () => void }) => {
+  const onSend = async (
+    e?: { preventDefault: () => void },
+    override?: { text: string; images: ComposerImageAttachment[] },
+  ) => {
     e?.preventDefault();
     const api = readNativeApi();
     if (!api || !activeThread || isSendBusy || isConnecting || sendInFlightRef.current) return;
@@ -2490,7 +2557,9 @@ export default function ChatView({ threadId }: ChatViewProps) {
       return;
     }
     const standaloneSlashCommand =
-      composerImages.length === 0 ? parseStandaloneComposerSlashCommand(trimmed) : null;
+      effectiveImages.length === 0 && !override
+        ? parseStandaloneComposerSlashCommand(trimmed)
+        : null;
     if (standaloneSlashCommand) {
       await handleInteractionModeChange(standaloneSlashCommand);
       promptRef.current = "";
@@ -2500,7 +2569,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
       setComposerTrigger(null);
       return;
     }
-    if (!trimmed && composerImages.length === 0) return;
+    if (!trimmed && effectiveImages.length === 0) return;
     if (!activeProject) return;
     const threadIdForSend = activeThread.id;
     const isFirstMessage = !isServerThread || activeThread.messages.length === 0;
@@ -2524,7 +2593,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
     sendInFlightRef.current = true;
     beginSendPhase(baseBranchForWorktree ? "preparing-worktree" : "sending-turn");
 
-    const composerImagesSnapshot = [...composerImages];
+    const composerImagesSnapshot = [...effectiveImages];
     const messageIdForSend = newMessageId();
     const messageCreatedAt = new Date().toISOString();
     const turnAttachmentsPromise = Promise.all(
@@ -2744,6 +2813,39 @@ export default function ChatView({ threadId }: ChatViewProps) {
       resetSendPhase();
     }
   };
+
+  onSendRef.current = onSend;
+
+  useEffect(() => {
+    if (!queuedMessage || queuedTurnReplayAction === "wait") {
+      return;
+    }
+
+    setQueuedMessage(null);
+    if (queuedTurnReplayAction === "restore") {
+      promptRef.current = queuedMessage.text;
+      setPrompt(queuedMessage.text);
+      addComposerImagesToDraft(queuedMessage.images.map(cloneComposerImageForRetry));
+      setComposerCursor(queuedMessage.text.length);
+      setComposerTrigger(detectComposerTrigger(queuedMessage.text, queuedMessage.text.length));
+      return;
+    }
+
+    void onSendRef.current(undefined, {
+      text: queuedMessage.text,
+      images: queuedMessage.images,
+    });
+  }, [
+    addComposerImagesToDraft,
+    queuedMessage,
+    queuedTurnReplayAction,
+    setPrompt,
+  ]);
+
+  // Clear queued message when switching threads.
+  useEffect(() => {
+    setQueuedMessage(null);
+  }, [activeThreadId]);
 
   const onInterrupt = async () => {
     const api = readNativeApi();
@@ -3330,6 +3432,9 @@ export default function ChatView({ threadId }: ChatViewProps) {
         );
         return;
       }
+      if (isQueuedComposerLocked) {
+        return;
+      }
       promptRef.current = nextPrompt;
       setPrompt(nextPrompt);
       setComposerCursor(nextCursor);
@@ -3345,6 +3450,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
     [
       activePendingProgress?.activeQuestion,
       activePendingUserInput,
+      isQueuedComposerLocked,
       onChangeActivePendingUserInputCustomAnswer,
       setPrompt,
     ],
@@ -3703,6 +3809,37 @@ export default function ChatView({ threadId }: ChatViewProps) {
                   ))}
                 </div>
               )}
+              {queuedMessage ? (
+                <div className="mb-3 overflow-hidden rounded-xl border border-border/70 bg-muted/25">
+                  <div className="flex items-center justify-between border-b border-border/60 px-3 py-2 text-[11px] text-muted-foreground/80">
+                    <span className="font-medium">1 Queued</span>
+                    <button
+                      type="button"
+                      className="rounded p-1 transition-colors hover:bg-muted/80 hover:text-foreground"
+                      onClick={() => setQueuedMessage(null)}
+                      aria-label="Cancel queued message"
+                    >
+                      <XIcon className="size-3.5" />
+                    </button>
+                  </div>
+                  <div className="flex items-center gap-2 px-3 py-2.5 text-sm text-foreground/90">
+                    <span
+                      aria-hidden="true"
+                      className="size-2 shrink-0 rounded-full border border-muted-foreground/50"
+                    />
+                    <span className="min-w-0 flex-1 truncate">
+                      {queuedMessageSummary(queuedMessage)}
+                    </span>
+                    {queuedMessage.images.length > 0 ? (
+                      <span className="shrink-0 text-[11px] text-muted-foreground/70">
+                        {queuedMessage.images.length === 1
+                          ? "1 image"
+                          : `${queuedMessage.images.length} images`}
+                      </span>
+                    ) : null}
+                  </div>
+                </div>
+              ) : null}
               <ComposerPromptEditor
                 ref={composerEditorRef}
                 value={
@@ -3729,7 +3866,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
                         ? "Ask for follow-up changes or attach images"
                         : "Ask anything, @tag files/folders, or use /model"
                 }
-                disabled={isConnecting || isComposerApprovalState}
+                disabled={isConnecting || isComposerApprovalState || isQueuedComposerLocked}
               />
             </div>
 
@@ -5636,7 +5773,7 @@ const ReasoningTraitsPicker = memo(function ReasoningTraitsPicker(props: {
   };
   const triggerLabel = [
     reasoningLabelByOption[props.effort],
-    ...(props.fastModeEnabled ? ["Fast"] : []),
+    ...(showFastMode && props.fastModeEnabled ? ["Fast"] : []),
   ]
     .filter(Boolean)
     .join(" · ");
@@ -5675,7 +5812,9 @@ const ReasoningTraitsPicker = memo(function ReasoningTraitsPicker(props: {
             {props.options.map((effort) => (
               <MenuRadioItem key={effort} value={effort}>
                 {reasoningLabelByOption[effort]}
-                {effort === defaultReasoningEffort ? " (default)" : ""}
+                {defaultReasoningEffort !== null && effort === defaultReasoningEffort
+                  ? " (default)"
+                  : ""}
               </MenuRadioItem>
             ))}
           </MenuRadioGroup>
