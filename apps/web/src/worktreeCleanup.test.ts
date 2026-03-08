@@ -15,8 +15,10 @@ function makeThread(overrides: Partial<Thread> = {}): Thread {
     interactionMode: DEFAULT_INTERACTION_MODE,
     session: null,
     messages: [],
+    tokenUsage: null,
     turnDiffSummaries: [],
     activities: [],
+    queuedTurns: [],
     proposedPlans: [],
     error: null,
     createdAt: "2026-02-13T00:00:00.000Z",
@@ -79,16 +81,16 @@ describe("getOrphanedWorktreePathForThread", () => {
 describe("formatWorktreePathForDisplay", () => {
   it("shows only the last path segment for unix-like paths", () => {
     const result = formatWorktreePathForDisplay(
-      "/Users/julius/.t3/worktrees/t3code-mvp/t3code-4e609bb8",
+      "/Users/julius/.t3/worktrees/osscode-mvp/osscode-4e609bb8",
     );
-    expect(result).toBe("t3code-4e609bb8");
+    expect(result).toBe("osscode-4e609bb8");
   });
 
   it("normalizes windows separators before selecting the final segment", () => {
     const result = formatWorktreePathForDisplay(
-      "C:\\Users\\julius\\.t3\\worktrees\\t3code-mvp\\t3code-4e609bb8",
+      "C:\\Users\\julius\\.t3\\worktrees\\osscode-mvp\\osscode-4e609bb8",
     );
-    expect(result).toBe("t3code-4e609bb8");
+    expect(result).toBe("osscode-4e609bb8");
   });
 
   it("uses the final segment even when outside ~/.t3/worktrees", () => {

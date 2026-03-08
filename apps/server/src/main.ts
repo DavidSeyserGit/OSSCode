@@ -68,7 +68,7 @@ export interface CliConfigShape {
  * CliConfig - Service tag for startup CLI/runtime helpers.
  */
 export class CliConfig extends ServiceMap.Service<CliConfig, CliConfigShape>()(
-  "t3/main/CliConfig",
+  "osscode/main/CliConfig",
 ) {
   static readonly layer = Layer.effect(
     CliConfig,
@@ -88,7 +88,7 @@ export class CliConfig extends ServiceMap.Service<CliConfig, CliConfigShape>()(
 }
 
 const CliEnvConfig = Config.all({
-  mode: Config.string("T3CODE_MODE").pipe(
+  mode: Config.string("OSSCODE_MODE").pipe(
     Config.option,
     Config.map(
       Option.match<RuntimeMode, string>({
@@ -97,26 +97,26 @@ const CliEnvConfig = Config.all({
       }),
     ),
   ),
-  port: Config.port("T3CODE_PORT").pipe(Config.option, Config.map(Option.getOrUndefined)),
-  host: Config.string("T3CODE_HOST").pipe(Config.option, Config.map(Option.getOrUndefined)),
-  stateDir: Config.string("T3CODE_STATE_DIR").pipe(
+  port: Config.port("OSSCODE_PORT").pipe(Config.option, Config.map(Option.getOrUndefined)),
+  host: Config.string("OSSCODE_HOST").pipe(Config.option, Config.map(Option.getOrUndefined)),
+  stateDir: Config.string("OSSCODE_STATE_DIR").pipe(
     Config.option,
     Config.map(Option.getOrUndefined),
   ),
   devUrl: Config.url("VITE_DEV_SERVER_URL").pipe(Config.option, Config.map(Option.getOrUndefined)),
-  noBrowser: Config.boolean("T3CODE_NO_BROWSER").pipe(
+  noBrowser: Config.boolean("OSSCODE_NO_BROWSER").pipe(
     Config.option,
     Config.map(Option.getOrUndefined),
   ),
-  authToken: Config.string("T3CODE_AUTH_TOKEN").pipe(
+  authToken: Config.string("OSSCODE_AUTH_TOKEN").pipe(
     Config.option,
     Config.map(Option.getOrUndefined),
   ),
-  autoBootstrapProjectFromCwd: Config.boolean("T3CODE_AUTO_BOOTSTRAP_PROJECT_FROM_CWD").pipe(
+  autoBootstrapProjectFromCwd: Config.boolean("OSSCODE_AUTO_BOOTSTRAP_PROJECT_FROM_CWD").pipe(
     Config.option,
     Config.map(Option.getOrUndefined),
   ),
-  logWebSocketEvents: Config.boolean("T3CODE_LOG_WS_EVENTS").pipe(
+  logWebSocketEvents: Config.boolean("OSSCODE_LOG_WS_EVENTS").pipe(
     Config.option,
     Config.map(Option.getOrUndefined),
   ),
@@ -300,7 +300,7 @@ const hostFlag = Flag.string("host").pipe(
   Flag.optional,
 );
 const stateDirFlag = Flag.string("state-dir").pipe(
-  Flag.withDescription("State directory path (equivalent to T3CODE_STATE_DIR)."),
+  Flag.withDescription("State directory path (equivalent to OSSCODE_STATE_DIR)."),
   Flag.optional,
 );
 const devUrlFlag = Flag.string("dev-url").pipe(
@@ -325,13 +325,13 @@ const autoBootstrapProjectFromCwdFlag = Flag.boolean("auto-bootstrap-project-fro
 );
 const logWebSocketEventsFlag = Flag.boolean("log-websocket-events").pipe(
   Flag.withDescription(
-    "Emit server-side logs for outbound WebSocket push traffic (equivalent to T3CODE_LOG_WS_EVENTS).",
+    "Emit server-side logs for outbound WebSocket push traffic (equivalent to OSSCODE_LOG_WS_EVENTS).",
   ),
   Flag.withAlias("log-ws-events"),
   Flag.optional,
 );
 
-export const t3Cli = Command.make("t3", {
+export const osscodeCli = Command.make("osscode", {
   mode: modeFlag,
   port: portFlag,
   host: hostFlag,

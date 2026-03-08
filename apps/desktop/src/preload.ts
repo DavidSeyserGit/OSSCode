@@ -16,7 +16,7 @@ const BACKEND_RUNTIME_GET_STATE_CHANNEL = "desktop:backend-runtime-get-state";
 const BACKEND_RESTART_CHANNEL = "desktop:backend-restart";
 const OPEN_LOG_DIRECTORY_CHANNEL = "desktop:open-log-directory";
 const SHOW_NOTIFICATION_CHANNEL = "desktop:show-notification";
-const wsUrl = process.env.T3CODE_DESKTOP_WS_URL ?? null;
+const wsUrl = process.env.OSSCODE_DESKTOP_WS_URL ?? null;
 
 contextBridge.exposeInMainWorld("desktopBridge", {
   getWsUrl: () => wsUrl,

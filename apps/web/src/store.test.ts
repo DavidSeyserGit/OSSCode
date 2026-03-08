@@ -23,10 +23,12 @@ function makeThread(overrides: Partial<Thread> = {}): Thread {
     messages: [],
     turnDiffSummaries: [],
     activities: [],
+    queuedTurns: [],
     proposedPlans: [],
     error: null,
     createdAt: "2026-02-13T00:00:00.000Z",
     latestTurn: null,
+    tokenUsage: null,
     branch: null,
     worktreePath: null,
     ...overrides,
@@ -61,10 +63,12 @@ function makeReadModelThread(overrides: Partial<OrchestrationReadModel["threads"
     branch: null,
     worktreePath: null,
     latestTurn: null,
+    tokenUsage: null,
     createdAt: "2026-02-27T00:00:00.000Z",
     updatedAt: "2026-02-27T00:00:00.000Z",
     deletedAt: null,
     messages: [],
+    queuedTurns: [],
     activities: [],
     proposedPlans: [],
     checkpoints: [],
@@ -146,5 +150,32 @@ describe("store read model sync", () => {
     const next = syncServerReadModel(initialState, readModel);
 
     expect(next.threads[0]?.model).toBe(DEFAULT_MODEL_BY_PROVIDER.codex);
+  });
+
+  it("syncs normalized token usage from the read model", () => {
+    const initialState = makeState(makeThread());
+    const readModel = makeReadModel(
+      makeReadModelThread({
+        tokenUsage: {
+          inputTokens: 1200,
+          outputTokens: 300,
+          cachedInputTokens: 200,
+          reasoningTokens: 80,
+          totalTokens: 1500,
+          updatedAt: "2026-03-08T00:00:00.000Z",
+        },
+      }),
+    );
+
+    const next = syncServerReadModel(initialState, readModel);
+
+    expect(next.threads[0]?.tokenUsage).toEqual({
+      inputTokens: 1200,
+      outputTokens: 300,
+      cachedInputTokens: 200,
+      reasoningTokens: 80,
+      totalTokens: 1500,
+      updatedAt: "2026-03-08T00:00:00.000Z",
+    });
   });
 });

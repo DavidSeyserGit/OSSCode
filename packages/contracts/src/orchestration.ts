@@ -156,6 +156,27 @@ export const OrchestrationMessage = Schema.Struct({
 });
 export type OrchestrationMessage = typeof OrchestrationMessage.Type;
 
+export const OrchestrationQueuedTurn = Schema.Struct({
+  queueEntryId: TrimmedNonEmptyString,
+  message: Schema.Struct({
+    messageId: MessageId,
+    role: Schema.Literal("user"),
+    text: Schema.String,
+    attachments: Schema.Array(ChatAttachment),
+  }),
+  provider: Schema.optional(ProviderKind),
+  model: Schema.optional(TrimmedNonEmptyString),
+  serviceTier: Schema.optional(Schema.NullOr(ProviderServiceTier)),
+  modelOptions: Schema.optional(ProviderModelOptions),
+  assistantDeliveryMode: Schema.optional(AssistantDeliveryMode),
+  runtimeMode: RuntimeMode.pipe(Schema.withDecodingDefault(() => DEFAULT_RUNTIME_MODE)),
+  interactionMode: ProviderInteractionMode.pipe(
+    Schema.withDecodingDefault(() => DEFAULT_PROVIDER_INTERACTION_MODE),
+  ),
+  createdAt: IsoDateTime,
+});
+export type OrchestrationQueuedTurn = typeof OrchestrationQueuedTurn.Type;
+
 export const OrchestrationProposedPlanId = TrimmedNonEmptyString;
 export type OrchestrationProposedPlanId = typeof OrchestrationProposedPlanId.Type;
 
@@ -250,6 +271,16 @@ export const OrchestrationLatestTurn = Schema.Struct({
 });
 export type OrchestrationLatestTurn = typeof OrchestrationLatestTurn.Type;
 
+export const OrchestrationTokenUsage = Schema.Struct({
+  inputTokens: NonNegativeInt,
+  outputTokens: NonNegativeInt,
+  cachedInputTokens: NonNegativeInt,
+  reasoningTokens: NonNegativeInt,
+  totalTokens: NonNegativeInt,
+  updatedAt: IsoDateTime,
+});
+export type OrchestrationTokenUsage = typeof OrchestrationTokenUsage.Type;
+
 export const OrchestrationThread = Schema.Struct({
   id: ThreadId,
   projectId: ProjectId,
@@ -262,10 +293,12 @@ export const OrchestrationThread = Schema.Struct({
   branch: Schema.NullOr(TrimmedNonEmptyString),
   worktreePath: Schema.NullOr(TrimmedNonEmptyString),
   latestTurn: Schema.NullOr(OrchestrationLatestTurn),
+  tokenUsage: Schema.optional(Schema.NullOr(OrchestrationTokenUsage)),
   createdAt: IsoDateTime,
   updatedAt: IsoDateTime,
   deletedAt: Schema.NullOr(IsoDateTime),
   messages: Schema.Array(OrchestrationMessage),
+  queuedTurns: Schema.Array(OrchestrationQueuedTurn).pipe(Schema.withDecodingDefault(() => [])),
   proposedPlans: Schema.Array(OrchestrationProposedPlan).pipe(
     Schema.withDecodingDefault(() => []),
   ),
@@ -407,6 +440,14 @@ const ThreadTurnInterruptCommand = Schema.Struct({
   createdAt: IsoDateTime,
 });
 
+const ThreadTurnQueueRemoveCommand = Schema.Struct({
+  type: Schema.Literal("thread.turn.queue.remove"),
+  commandId: CommandId,
+  threadId: ThreadId,
+  queueEntryId: TrimmedNonEmptyString,
+  createdAt: IsoDateTime,
+});
+
 const ThreadApprovalRespondCommand = Schema.Struct({
   type: Schema.Literal("thread.approval.respond"),
   commandId: CommandId,
@@ -451,6 +492,7 @@ const DispatchableClientOrchestrationCommand = Schema.Union([
   ThreadInteractionModeSetCommand,
   ThreadTurnStartCommand,
   ThreadTurnInterruptCommand,
+  ThreadTurnQueueRemoveCommand,
   ThreadApprovalRespondCommand,
   ThreadUserInputRespondCommand,
   ThreadCheckpointRevertCommand,
@@ -470,6 +512,7 @@ export const ClientOrchestrationCommand = Schema.Union([
   ThreadInteractionModeSetCommand,
   ClientThreadTurnStartCommand,
   ThreadTurnInterruptCommand,
+  ThreadTurnQueueRemoveCommand,
   ThreadApprovalRespondCommand,
   ThreadUserInputRespondCommand,
   ThreadCheckpointRevertCommand,
@@ -526,11 +569,27 @@ const ThreadTurnDiffCompleteCommand = Schema.Struct({
   createdAt: IsoDateTime,
 });
 
+const ThreadTokenUsageUpdateCommand = Schema.Struct({
+  type: Schema.Literal("thread.token-usage.update"),
+  commandId: CommandId,
+  threadId: ThreadId,
+  tokenUsage: OrchestrationTokenUsage,
+  createdAt: IsoDateTime,
+});
+
 const ThreadActivityAppendCommand = Schema.Struct({
   type: Schema.Literal("thread.activity.append"),
   commandId: CommandId,
   threadId: ThreadId,
   activity: OrchestrationThreadActivity,
+  createdAt: IsoDateTime,
+});
+
+const ThreadTurnQueueConsumeCommand = Schema.Struct({
+  type: Schema.Literal("thread.turn.queue.consume"),
+  commandId: CommandId,
+  threadId: ThreadId,
+  queueEntryId: TrimmedNonEmptyString,
   createdAt: IsoDateTime,
 });
 
@@ -548,7 +607,9 @@ const InternalOrchestrationCommand = Schema.Union([
   ThreadMessageAssistantCompleteCommand,
   ThreadProposedPlanUpsertCommand,
   ThreadTurnDiffCompleteCommand,
+  ThreadTokenUsageUpdateCommand,
   ThreadActivityAppendCommand,
+  ThreadTurnQueueConsumeCommand,
   ThreadRevertCompleteCommand,
 ]);
 export type InternalOrchestrationCommand = typeof InternalOrchestrationCommand.Type;
@@ -569,6 +630,8 @@ export const OrchestrationEventType = Schema.Literals([
   "thread.runtime-mode-set",
   "thread.interaction-mode-set",
   "thread.message-sent",
+  "thread.turn-enqueued",
+  "thread.turn-queue-item-removed",
   "thread.turn-start-requested",
   "thread.turn-interrupt-requested",
   "thread.approval-response-requested",
@@ -579,6 +642,7 @@ export const OrchestrationEventType = Schema.Literals([
   "thread.session-set",
   "thread.proposed-plan-upserted",
   "thread.turn-diff-completed",
+  "thread.token-usage-updated",
   "thread.activity-appended",
 ]);
 export type OrchestrationEventType = typeof OrchestrationEventType.Type;
@@ -666,6 +730,18 @@ export const ThreadMessageSentPayload = Schema.Struct({
   updatedAt: IsoDateTime,
 });
 
+export const ThreadTurnEnqueuedPayload = Schema.Struct({
+  threadId: ThreadId,
+  queuedTurn: OrchestrationQueuedTurn,
+});
+
+export const ThreadTurnQueueItemRemovedPayload = Schema.Struct({
+  threadId: ThreadId,
+  queueEntryId: TrimmedNonEmptyString,
+  reason: Schema.Literals(["consumed", "cancelled"]),
+  createdAt: IsoDateTime,
+});
+
 export const ThreadTurnStartRequestedPayload = Schema.Struct({
   threadId: ThreadId,
   messageId: MessageId,
@@ -736,6 +812,11 @@ export const ThreadTurnDiffCompletedPayload = Schema.Struct({
   files: Schema.Array(OrchestrationCheckpointFile),
   assistantMessageId: Schema.NullOr(MessageId),
   completedAt: IsoDateTime,
+});
+
+export const OrchestrationThreadTokenUsageUpdatedPayload = Schema.Struct({
+  threadId: ThreadId,
+  tokenUsage: OrchestrationTokenUsage,
 });
 
 export const ThreadActivityAppendedPayload = Schema.Struct({
@@ -826,6 +907,16 @@ export const OrchestrationEvent = Schema.Union([
   }),
   Schema.Struct({
     ...EventBaseFields,
+    type: Schema.Literal("thread.turn-enqueued"),
+    payload: ThreadTurnEnqueuedPayload,
+  }),
+  Schema.Struct({
+    ...EventBaseFields,
+    type: Schema.Literal("thread.turn-queue-item-removed"),
+    payload: ThreadTurnQueueItemRemovedPayload,
+  }),
+  Schema.Struct({
+    ...EventBaseFields,
     type: Schema.Literal("thread.turn-start-requested"),
     payload: ThreadTurnStartRequestedPayload,
   }),
@@ -873,6 +964,11 @@ export const OrchestrationEvent = Schema.Union([
     ...EventBaseFields,
     type: Schema.Literal("thread.turn-diff-completed"),
     payload: ThreadTurnDiffCompletedPayload,
+  }),
+  Schema.Struct({
+    ...EventBaseFields,
+    type: Schema.Literal("thread.token-usage-updated"),
+    payload: OrchestrationThreadTokenUsageUpdatedPayload,
   }),
   Schema.Struct({
     ...EventBaseFields,
@@ -930,6 +1026,16 @@ export const OrchestrationPersistedEvent = Schema.Union([
   }),
   Schema.Struct({
     ...PersistedEventBaseFields,
+    eventType: Schema.Literal("thread.turn-enqueued"),
+    payload: ThreadTurnEnqueuedPayload,
+  }),
+  Schema.Struct({
+    ...PersistedEventBaseFields,
+    eventType: Schema.Literal("thread.turn-queue-item-removed"),
+    payload: ThreadTurnQueueItemRemovedPayload,
+  }),
+  Schema.Struct({
+    ...PersistedEventBaseFields,
     eventType: Schema.Literal("thread.turn-start-requested"),
     payload: ThreadTurnStartRequestedPayload,
   }),
@@ -977,6 +1083,11 @@ export const OrchestrationPersistedEvent = Schema.Union([
     ...PersistedEventBaseFields,
     eventType: Schema.Literal("thread.turn-diff-completed"),
     payload: ThreadTurnDiffCompletedPayload,
+  }),
+  Schema.Struct({
+    ...PersistedEventBaseFields,
+    eventType: Schema.Literal("thread.token-usage-updated"),
+    payload: OrchestrationThreadTokenUsageUpdatedPayload,
   }),
   Schema.Struct({
     ...PersistedEventBaseFields,

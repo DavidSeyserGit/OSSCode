@@ -258,6 +258,43 @@ describe("ProviderRuntimeIngestion", () => {
     expect(thread.session?.lastError).toBe("turn failed");
   });
 
+  it("projects thread token usage updates into the read model", async () => {
+    const harness = await createHarness();
+    const now = new Date().toISOString();
+
+    harness.emit({
+      type: "thread.token-usage.updated",
+      eventId: asEventId("evt-thread-token-usage"),
+      provider: "codex",
+      threadId: asThreadId("thread-1"),
+      createdAt: now,
+      payload: {
+        usage: {
+          input_tokens: 1200,
+          output_tokens: 300,
+          total_tokens: 1500,
+          input_tokens_details: {
+            cached_tokens: 200,
+          },
+        },
+      },
+    });
+
+    const thread = await waitForThread(
+      harness.engine,
+      (entry) => entry.tokenUsage?.totalTokens === 1500,
+    );
+
+    expect(thread.tokenUsage).toEqual({
+      inputTokens: 1200,
+      outputTokens: 300,
+      cachedInputTokens: 200,
+      reasoningTokens: 0,
+      totalTokens: 1500,
+      updatedAt: now,
+    });
+  });
+
   it("applies provider session.state.changed transitions directly", async () => {
     const harness = await createHarness();
     const waitingAt = new Date().toISOString();

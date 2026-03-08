@@ -4,6 +4,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { CheckpointReactor } from "../Services/CheckpointReactor.ts";
 import { ProviderCommandReactor } from "../Services/ProviderCommandReactor.ts";
 import { ProviderRuntimeIngestionService } from "../Services/ProviderRuntimeIngestion.ts";
+import { QueuedTurnReactor } from "../Services/QueuedTurnReactor.ts";
 import { OrchestrationReactor } from "../Services/OrchestrationReactor.ts";
 import { makeOrchestrationReactor } from "./OrchestrationReactor.ts";
 
@@ -17,7 +18,7 @@ describe("OrchestrationReactor", () => {
     runtime = null;
   });
 
-  it("starts provider ingestion, provider command, and checkpoint reactors", async () => {
+  it("starts provider ingestion, provider command, checkpoint, and queued-turn reactors", async () => {
     const started: string[] = [];
 
     runtime = ManagedRuntime.make(
@@ -43,6 +44,13 @@ describe("OrchestrationReactor", () => {
             }),
           }),
         ),
+        Layer.provideMerge(
+          Layer.succeed(QueuedTurnReactor, {
+            start: Effect.sync(() => {
+              started.push("queued-turn-reactor");
+            }),
+          }),
+        ),
       ),
     );
 
@@ -54,6 +62,7 @@ describe("OrchestrationReactor", () => {
       "provider-runtime-ingestion",
       "provider-command-reactor",
       "checkpoint-reactor",
+      "queued-turn-reactor",
     ]);
 
     await Effect.runPromise(Scope.close(scope, Exit.void));

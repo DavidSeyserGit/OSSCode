@@ -5,6 +5,7 @@ import {
   MessageId,
   ProjectId,
   ThreadId,
+  TurnId,
 } from "@t3tools/contracts";
 import { describe, expect, it } from "vitest";
 import { Effect } from "effect";
@@ -199,6 +200,119 @@ describe("decider project scripts", () => {
       },
       runtimeMode: "approval-required",
     });
+  });
+
+  it("enqueues thread.turn.start while the thread already has an active turn", async () => {
+    const now = new Date().toISOString();
+    const initial = createEmptyReadModel(now);
+    const withProject = await Effect.runPromise(
+      projectEvent(initial, {
+        sequence: 1,
+        eventId: asEventId("evt-project-create-queue"),
+        aggregateKind: "project",
+        aggregateId: asProjectId("project-1"),
+        type: "project.created",
+        occurredAt: now,
+        commandId: CommandId.makeUnsafe("cmd-project-create-queue"),
+        causationEventId: null,
+        correlationId: CommandId.makeUnsafe("cmd-project-create-queue"),
+        metadata: {},
+        payload: {
+          projectId: asProjectId("project-1"),
+          title: "Project",
+          workspaceRoot: "/tmp/project",
+          defaultModel: null,
+          scripts: [],
+          createdAt: now,
+          updatedAt: now,
+        },
+      }),
+    );
+    const withThread = await Effect.runPromise(
+      projectEvent(withProject, {
+        sequence: 2,
+        eventId: asEventId("evt-thread-create-queue"),
+        aggregateKind: "thread",
+        aggregateId: ThreadId.makeUnsafe("thread-1"),
+        type: "thread.created",
+        occurredAt: now,
+        commandId: CommandId.makeUnsafe("cmd-thread-create-queue"),
+        causationEventId: null,
+        correlationId: CommandId.makeUnsafe("cmd-thread-create-queue"),
+        metadata: {},
+        payload: {
+          threadId: ThreadId.makeUnsafe("thread-1"),
+          projectId: asProjectId("project-1"),
+          title: "Thread",
+          model: "gpt-5-codex",
+          interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
+          runtimeMode: "approval-required",
+          branch: null,
+          worktreePath: null,
+          createdAt: now,
+          updatedAt: now,
+        },
+      }),
+    );
+    const readModel = await Effect.runPromise(
+      projectEvent(withThread, {
+        sequence: 3,
+        eventId: asEventId("evt-thread-session-running"),
+        aggregateKind: "thread",
+        aggregateId: ThreadId.makeUnsafe("thread-1"),
+        type: "thread.session-set",
+        occurredAt: now,
+        commandId: CommandId.makeUnsafe("cmd-thread-session-running"),
+        causationEventId: null,
+        correlationId: CommandId.makeUnsafe("cmd-thread-session-running"),
+        metadata: {},
+        payload: {
+          threadId: ThreadId.makeUnsafe("thread-1"),
+          session: {
+            threadId: ThreadId.makeUnsafe("thread-1"),
+            status: "running",
+            providerName: "codex",
+            runtimeMode: "approval-required",
+            activeTurnId: TurnId.makeUnsafe("turn-1"),
+            lastError: null,
+            updatedAt: now,
+          },
+        },
+      }),
+    );
+
+    const result = await Effect.runPromise(
+      decideOrchestrationCommand({
+        command: {
+          type: "thread.turn.start",
+          commandId: CommandId.makeUnsafe("cmd-turn-start-queued"),
+          threadId: ThreadId.makeUnsafe("thread-1"),
+          message: {
+            messageId: asMessageId("message-user-queued"),
+            role: "user",
+            text: "follow up",
+            attachments: [],
+          },
+          provider: "codex",
+          model: "gpt-5.3-codex",
+          interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
+          runtimeMode: "approval-required",
+          createdAt: now,
+        },
+        readModel,
+      }),
+    );
+
+    expect(Array.isArray(result)).toBe(false);
+    const event = Array.isArray(result) ? result[0] : result;
+    expect(event?.type).toBe("thread.turn-enqueued");
+    if (event?.type !== "thread.turn-enqueued") {
+      return;
+    }
+    expect(event.payload.threadId).toBe(ThreadId.makeUnsafe("thread-1"));
+    expect(event.payload.queuedTurn.message.messageId).toBe(asMessageId("message-user-queued"));
+    expect(event.payload.queuedTurn.message.text).toBe("follow up");
+    expect(event.payload.queuedTurn.provider).toBe("codex");
   });
 
   it("preserves explicit turn modes even when the stored thread modes are stale", async () => {

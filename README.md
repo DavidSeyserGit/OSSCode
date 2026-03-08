@@ -5,15 +5,13 @@
 
 A minimal web GUI for coding agents. Supports Codex, Claude Code, and Cursor.
 
-Forked from [T3 Code](https://github.com/pingdotgg/t3code). We work on a separate project with the goal of shipping the most relevant features quickly.
-
 ## How to use
 
 > [!WARNING]
 > You need to have the relevant CLI installed and authorized (e.g. [Codex](https://github.com/openai/codex)) for OSSCode to work.
 
 ```bash
-npx t3
+npx osscode
 ```
 
 Or install the [desktop app from the Releases page](https://github.com/DavidSeyserGit/OSSCode/releases).

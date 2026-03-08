@@ -18,4 +18,4 @@ export interface CursorAdapterShape extends ProviderAdapterShape<ProviderAdapter
 export class CursorAdapter extends ServiceMap.Service<
   CursorAdapter,
   CursorAdapterShape
->()("t3/provider/Services/CursorAdapter") {}
+>()("osscode/provider/Services/CursorAdapter") {}

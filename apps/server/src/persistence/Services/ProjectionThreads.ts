@@ -8,6 +8,8 @@
  */
 import {
   IsoDateTime,
+  OrchestrationTokenUsage,
+  OrchestrationQueuedTurn,
   ProjectId,
   ProviderInteractionMode,
   RuntimeMode,
@@ -29,6 +31,8 @@ export const ProjectionThread = Schema.Struct({
   branch: Schema.NullOr(Schema.String),
   worktreePath: Schema.NullOr(Schema.String),
   latestTurnId: Schema.NullOr(TurnId),
+  tokenUsage: Schema.NullOr(OrchestrationTokenUsage),
+  queuedTurns: Schema.Array(OrchestrationQueuedTurn),
   createdAt: IsoDateTime,
   updatedAt: IsoDateTime,
   deletedAt: Schema.NullOr(IsoDateTime),
@@ -91,4 +95,4 @@ export interface ProjectionThreadRepositoryShape {
 export class ProjectionThreadRepository extends ServiceMap.Service<
   ProjectionThreadRepository,
   ProjectionThreadRepositoryShape
->()("t3/persistence/Services/ProjectionThreads/ProjectionThreadRepository") {}
+>()("osscode/persistence/Services/ProjectionThreads/ProjectionThreadRepository") {}

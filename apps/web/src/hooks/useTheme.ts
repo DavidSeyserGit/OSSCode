@@ -12,7 +12,7 @@ type ThemeSnapshot = {
   systemDark: boolean;
 };
 
-const STORAGE_KEY = "t3code:theme";
+const STORAGE_KEY = "osscode:theme";
 const MEDIA_QUERY = "(prefers-color-scheme: dark)";
 
 const THEME_VALUES = new Set<Theme>([

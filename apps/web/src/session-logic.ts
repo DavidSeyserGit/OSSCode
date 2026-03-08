@@ -8,7 +8,7 @@ import {
   type TurnId,
 } from "@t3tools/contracts";
 
-import type { ChatMessage, ProposedPlan, SessionPhase, ThreadSession, TurnDiffSummary } from "./types";
+import type { ChatMessage, ProposedPlan, ThreadSession, TurnDiffSummary } from "./types";
 
 export type ProviderPickerKind = ProviderKind | "claudeCode" | "cursor";
 
@@ -62,8 +62,6 @@ export interface LatestProposedPlanState {
   turnId: TurnId | null;
   planMarkdown: string;
 }
-
-export type QueuedTurnReplayAction = "wait" | "send" | "restore";
 
 export type TimelineEntry =
   | {
@@ -138,56 +136,6 @@ export function deriveActiveWorkStartedAt(
     return latestTurn?.startedAt ?? sendStartedAt;
   }
   return sendStartedAt;
-}
-
-export function deriveQueuedTurnReplayAction(input: {
-  queuedAfterTurnId: TurnId | null;
-  phase: SessionPhase;
-  latestTurn: Pick<OrchestrationLatestTurn, "turnId" | "state"> | null;
-  latestTurnSettled: boolean;
-  session: Pick<ThreadSession, "status" | "activeTurnId"> | null;
-  isSendBusy: boolean;
-  isConnecting: boolean;
-  sendInFlight: boolean;
-  hasPendingApproval: boolean;
-  hasPendingUserInput: boolean;
-}): QueuedTurnReplayAction {
-  if (
-    input.phase !== "ready" ||
-    input.isSendBusy ||
-    input.isConnecting ||
-    input.sendInFlight ||
-    input.hasPendingApproval ||
-    input.hasPendingUserInput
-  ) {
-    return "wait";
-  }
-
-  if (input.session?.status === "error") {
-    return "restore";
-  }
-
-  if (input.queuedAfterTurnId === null) {
-    return "send";
-  }
-
-  if (input.session?.activeTurnId === input.queuedAfterTurnId) {
-    return "wait";
-  }
-
-  if (!input.latestTurnSettled || input.latestTurn?.turnId !== input.queuedAfterTurnId) {
-    return "wait";
-  }
-
-  if (input.latestTurn.state === "error") {
-    return "restore";
-  }
-
-  if (input.latestTurn.state === "completed" || input.latestTurn.state === "interrupted") {
-    return "send";
-  }
-
-  return "wait";
 }
 
 function requestKindFromRequestType(
@@ -665,7 +613,9 @@ export function inferCheckpointTurnCountByTurnId(
   return result;
 }
 
-export function derivePhase(session: ThreadSession | null): SessionPhase {
+export function derivePhase(
+  session: ThreadSession | null,
+): "disconnected" | "connecting" | "ready" | "running" {
   if (!session || session.status === "closed") return "disconnected";
   if (session.status === "connecting") return "connecting";
   if (session.status === "running") return "running";

@@ -61,6 +61,7 @@ function makeSnapshot(input: {
         deletedAt: null,
         messages: [],
         activities: [],
+        queuedTurns: [],
         proposedPlans: [],
         checkpoints: [
           {
